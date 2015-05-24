@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE entry SYSTEM "SamplesInfo.dtd">
+<entry>
+    <title>Forward pass with CUDNN</title>
+    <name>mnistCUDNN</name>
+    <owner>Nikolay Markovskiy</owner>
+    <group>CUDALibraries</group>
+    <description><![CDATA[A CUDNN CUDA Sample that demonstrates how to use the library to implement forward pass.]]></description>
+    <project_path>7_CUDALibraries\mnistCUDNN</project_path>
+    <executable>bin\win32\release\mnistCUDNN.exe</executable>
+    <type>exe</type>
+    <primary_file>mnistCUDNN.cpp</primary_file>
+    <supported_sm_architectures>
+        <from>3.0</from>
+    </supported_sm_architectures>
+    <scopes>
+        <scope>1:CUDA Basic Topics</scope>
+        <scope>1:Performance Strategies</scope>
+        <scope>2:Machine Learning</scope>
+        <scope>2:Computer Vision</scope>
+    </scopes>
+    <featured_date>110125</featured_date>
+    <keywords>
+        <keyword>CUDA</keyword>
+        <keyword>CUDNN</keyword>
+        <keyword>Machine Learning</keyword>
+        <keyword>Forward Pass</keyword>
+    </keywords>
+    <files>
+        <file>data\conv1.bin</file>
+        <file>data\conv1.bias.bin</file>
+        <file>data\conv2.bin</file>
+        <file>data\conv2.bias.bin</file>
+        <file>data\ip1.bin</file>
+        <file>data\ip1.bias.bin</file>
+        <file>data\ip2.bin</file>
+        <file>data\ip2.bias.bin</file>
+        <file>data\one_28x28.pgm</file>
+        <file>data\three_28x28.pgm</file>
+        <file>data\five_28x28.pgm</file>
+    </files>
+    <gencode>
+        <include>all</include>
+        <exclude>20</exclude>
+    </gencode>
+    <supportedbuilds>
+        <build>makefile</build>
+        <build>solution</build>
+    </supportedbuilds>
+    <keyconcepts>
+        <concept level="basic">Performance Strategies</concept>
+        <concept level="basic">Machine Learning</concept>
+        <concept level="basic">CUDNN Library</concept>
+    </keyconcepts>
+    <libraries>
+        <library os="windows">nppi</library>
+        <library os="windows">nppc</library>
+        <library os="windows">cublas</library>
+        <library os="windows">cudnn</library>
+        <library os="linux">nppi_static</library>
+        <library os="linux">nppc_static</library>
+        <library os="linux">culibos</library>
+        <library os="Linux">freeimage</library>
+        <library os="Linux">cudnn</library>
+        <library os="Linux">cublas</library>
+        <library arch="32" os="Windows">freeimage</library>
+        <library arch="64" os="Windows">freeimage64</library>
+    </libraries>
+    <librarypaths>
+        <path os="Windows">../common/FreeImage/lib/</path>
+        <path os="macosx">../common/FreeImage/lib/$(TARGET_OS)</path>
+        <path os="linux">../common/FreeImage/lib/$(TARGET_OS)/$(TARGET_ARCH)</path>
+    </librarypaths>
+    <includepaths>
+        <path>../common/UtilNPP</path>
+        <path>../common/FreeImage/include</path>
+    </includepaths>
+    <devicecompilation>whole</devicecompilation>
+    <required_dependencies>
+        <dependency>FreeImage</dependency>
+        <dependency>NPP</dependency>
+        <dependency>CUBLAS</dependency>
+        <dependency>CUDNN</dependency>
+    </required_dependencies>
+    <supported_envs>
+        <env>
+            <platform>linux</platform>
+            <arch>x86_64</arch>
+        </env>
+        <env>
+            <platform>linux</platform>
+            <arch>i686</arch>
+        </env>
+        <env>
+            <platform>windows7</platform>
+        </env>
+        <env>
+            <platform>macosx</platform>
+            <arch>x86_64</arch>
+        </env>
+        <env>
+            <platform>macosx</platform>
+            <arch>i686</arch>
+        </env>
+        <env>
+            <arch>arm</arch>
+        </env>
+    </supported_envs>
+    <nsight_eclipse>true</nsight_eclipse>
+</entry>
