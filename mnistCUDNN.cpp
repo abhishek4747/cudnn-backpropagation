@@ -1,12 +1,8 @@
 /**
-* Copyright 2014 NVIDIA Corporation.  All rights reserved.
+* Copyright 2014 Abhishek Kumar.  All rights reserved.
 *
-* Please refer to the NVIDIA end user license agreement (EULA) associated
-* with this source code for terms and conditions that govern your use of
-* this software. Any use, reproduction, disclosure, or distribution of
-* this software and related documentation outside the terms of the EULA
-* is strictly prohibited.
-*
+* Author: Abhishek Kumar <abhishek.iitd16@gmail.com>
+* 
 */
 
 /*
@@ -16,7 +12,7 @@
  * the MNIST dataset using Caffe. The network consists of two 
  * convolution layers, two pooling layers, one relu and two 
  * fully connected layers. Final layer gets processed by Softmax. 
- * cublasSgemv is used to implement fully connected layers.
+ * cublasDgemv is used to implement fully connected layers.
  */
 
 #include <sstream>
@@ -24,17 +20,21 @@
 #include <stdlib.h>
 #include <vector>
 #include <algorithm>
+#include <iomanip>
 
 #include <cublas_v2.h>
 #include <cudnn.h>
 
 #include "ImageIO.h"
 
-#define value_type float
+#define value_type double
 
 #define IMAGE_H 28
 #define IMAGE_W 28
 #define N (IMAGE_H*IMAGE_W)  // dimension of training data
+
+#define DEBUG 0
+
 
 const char *first_image = "one_28x28.pgm";
 const char *second_image = "three_28x28.pgm";
@@ -52,6 +52,8 @@ const char *ip2_bias_bin = "ip2.bias.bin";
 /********************************************************
  * Prints the error message, and exits
  * ******************************************************/
+
+#define mymin(a,b) (a>b?b:a)
 
 #define EXIT_WAIVED 0
 
@@ -87,9 +89,9 @@ void get_path(std::string& sFilename, const char *fname, const char *pname)
 
 void printHostVector(std::string str, int size, value_type* vec){
 	std::cout << str ;
-    for (int i = 0; i < size; i++)
+    for (int i = 0; i < mymin(size,400); i++)
     {
-        std::cout << vec[i] << " ";
+        std::cout << std::setprecision(2) << vec[i] << " ";
     }
     std::cout << std::endl; 
 }
@@ -151,11 +153,11 @@ struct Layer_t
 		output_h = new value_type[outputs];
 		del_h = new value_type[outputs];
 
-		// TODO Random Initialization
+		// Random Initialization
 		for (int i=0; i<size; i++)
-			data_h[i]=1;
+			data_h[i] = (((value_type)rand())/(rand()+1))/100000;
 		for (int i=0; i<size_b; i++)
-			bias_h[i]=1;			
+			bias_h[i] = (((value_type)rand())/(rand()+1))/100000;			
 		for (int i=0; i<outputs; i++){
 			output_h[i]=0;
 			del_h[i]=0;
@@ -171,12 +173,10 @@ struct Layer_t
         checkCudaErrors( cudaMemcpy(output_d, output_h, size_o_ac, cudaMemcpyHostToDevice) );
         checkCudaErrors( cudaMemcpy(del_d, del_h, size_o_ac, cudaMemcpyHostToDevice) );
 
-		/*
-		printHostVector(size, data_h);
-		std::cout<<"\n\n\n\n"<<std::endl;
-		printHostVector(size_b, bias_h);
-		std::cout<<"\n\n\n\n"<<std::endl;
-		*/
+		if (DEBUG){
+			printHostVector("Weights:\n",size, data_h);
+			printHostVector("Bias:\n",size_b, bias_h);
+		}
 	};
 
     ~Layer_t()
@@ -280,7 +280,7 @@ class network_t
   public:
     network_t()
     {
-        dataType = CUDNN_DATA_FLOAT;
+        dataType = CUDNN_DATA_DOUBLE;
         tensorFormat = CUDNN_TENSOR_NCHW;
         createHandles();    
     };
@@ -329,7 +329,7 @@ class network_t
         // place bias into dstData
         checkCudaErrors( cudaMemcpy(*dstData, ip.bias_d, dim_y*sizeof(value_type), cudaMemcpyDeviceToDevice) );
         
-        checkCudaErrors( cublasSgemv(cublasHandle, CUBLAS_OP_T,
+        checkCudaErrors( cublasDgemv(cublasHandle, CUBLAS_OP_T,
                                       dim_x, dim_y,
                                       &alpha,
                                       ip.data_d, dim_x,
@@ -340,9 +340,7 @@ class network_t
         h = 1; w = 1; c = dim_y;
     }
 	
-	void fullyConnectedBackward(const Layer_t& current_layer,
-				const value_type* last_input)
-    {
+	void fullyConnectedBackward(const Layer_t& current_layer, const value_type* last_input){
         int dim_x = current_layer.inputs;
         int dim_y = current_layer.outputs;
 		int dim_z = 1;
@@ -350,12 +348,11 @@ class network_t
         resize(dim_x*dim_y, &dstData);
 
         value_type alpha = value_type(1), beta = value_type(0);
-        // place bias into dstData
         // checkCudaErrors( cudaMemcpy(*dstData, ip.bias_d, ip.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
-		//printDeviceVector("last_input: \n", current_layer.inputs, last_input);
-		//printDeviceVector("del_W: \n", current_layer.outputs, current_layer.del_d);
+		//if (DEBUG) printDeviceVector("last_input: \n", current_layer.inputs, last_input);
+		//if (DEBUG) printDeviceVector("del_W: \n", current_layer.outputs, current_layer.del_d);
 		
-        checkCudaErrors( cublasSgemm(cublasHandle, 
+        checkCudaErrors( cublasDgemm(cublasHandle, 
 									  CUBLAS_OP_N, CUBLAS_OP_N,
                                       dim_x, dim_y, dim_z,
                                       &alpha,
@@ -364,17 +361,17 @@ class network_t
                                       &beta,
                                       dstData, dim_x) );
 		
-		//printDeviceVector("delta_W: \n", current_layer.inputs*current_layer.outputs, *dstData);
+		if (DEBUG) printDeviceVector("\tdelta_W (del_W*hidden_input): \n", current_layer.inputs*current_layer.outputs, dstData);
 
 		alpha = value_type(0.1); // learning rate
 		beta = value_type(1); 
-		//checkCudaErrors( cublasSscal(cublasHandle, ip.inputs*ip.outputs, &alpha, ip.data_d, 1); 
+		//checkCudaErrors( cublasDscal(cublasHandle, ip.inputs*ip.outputs, &alpha, ip.data_d, 1); 
 		const value_type* B = current_layer.data_d;
 		// C = α op ( A ) + β * C
 		// C = 0.1 * delta_W2 + C
-		//printDeviceVector("W: old\n", dim_x*dim_y, current_layer.data_d);
+		if (DEBUG) printDeviceVector("\tW = W + 0.1*delta_W: old\n", dim_x*dim_y, current_layer.data_d);
 		
-		checkCudaErrors( cublasSgeam(cublasHandle,
+		checkCudaErrors( cublasDgeam(cublasHandle,
 										CUBLAS_OP_N, CUBLAS_OP_N,
 										dim_x, dim_y,
 										&alpha,
@@ -382,19 +379,23 @@ class network_t
 										&beta,
 										B, dim_x,
 										current_layer.data_d, dim_x) );
+		if (DEBUG) printDeviceVector("\tW: \n", dim_x*dim_y, current_layer.data_d);
 
+        // place bias into dstData
 		dim_x = 1;
 		const value_type* B2 = current_layer.bias_d;
-		checkCudaErrors( cublasSgeam(cublasHandle,
+		if (DEBUG) printDeviceVector("\tdel_W:\n", current_layer.outputs, current_layer.del_d);
+		if (DEBUG) printDeviceVector("\tB = B + 0.1*del_W: old\n", current_layer.outputs, current_layer.bias_d);
+		checkCudaErrors( cublasDgeam(cublasHandle,
 										CUBLAS_OP_N, CUBLAS_OP_N,
 										dim_x, dim_y,
 										&alpha,
 										current_layer.del_d, dim_x,
 										&beta,
-										B, dim_x,
+										B2, dim_x,
 										current_layer.bias_d, dim_x) );
+		if (DEBUG) printDeviceVector("\tB:\n", current_layer.outputs, current_layer.bias_d);
 
-		//printDeviceVector("W: \n", dim_x*dim_y, current_layer.data_d);
 		checkCudaErrors( cudaFree(dstData));
     }
 
@@ -677,7 +678,7 @@ class network_t
             if (result[id] < result[i]) id = i;
         }
 
-        printDeviceVector("Resulting weights from Softmax: \n",n*c*h*w, srcData);
+        if (DEBUG) printDeviceVector("Resulting weights from Softmax: \n",n*c*h*w, srcData);
 
         checkCudaErrors( cudaFree(srcData) );
         checkCudaErrors( cudaFree(dstData) );
@@ -685,37 +686,50 @@ class network_t
     }
 
 	int predictExample(const value_type** image_data, value_type target, const Layer_t& input, const Layer_t& hidden){
-		int n,c,h,w;
-        int id = 0;
-        value_type *srcData = NULL, *dstData = NULL;
+		
+		value_type *image_data_d = NULL;
         value_type imgData_h[IMAGE_H*IMAGE_W];
 
         // Plot to console and normalize image to be in range [0,1]
         for (int i = 0; i < N; i++)
         {
 			imgData_h[i] = (*image_data)[i] / value_type(255);
-			#define DEBUG 0
-			#if DEBUG
+			#if 0
 			std::cout<<(imgData_h[i]>0?"#":" ")<<" ";
 			if (i%IMAGE_W==IMAGE_W-1)
 				std::cout<<std::endl;
 			#endif
         }
+		resize(IMAGE_H*IMAGE_W, &image_data_d);
+		checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, IMAGE_H*IMAGE_W*sizeof(value_type), cudaMemcpyHostToDevice) );
+		int id = predictExampleDevice(image_data_d, target, input, hidden);
+        checkCudaErrors( cudaFree(image_data_d) );
+		return id;
+	}
+
+
+	int predictExampleDevice(const value_type* image_data_d, value_type target, const Layer_t& input, const Layer_t& hidden){
+		int n,c,h,w;
+        value_type *srcData = NULL, *dstData = NULL;
 		if (DEBUG) std::cout<<std::endl<<"Target: "<<target<<std::endl;
 
 		// Setup Variables for forward propagation
-        checkCudaErrors( cudaMalloc(&srcData, IMAGE_H*IMAGE_W*sizeof(value_type)) ); //resize(IMAGE_H*IMAGE_W, &srcData);
-		checkCudaErrors( cudaMemcpy(srcData, imgData_h, IMAGE_H*IMAGE_W*sizeof(value_type), cudaMemcpyHostToDevice) );
+        //checkCudaErrors( cudaMalloc(&srcData, IMAGE_H*IMAGE_W*sizeof(value_type)) ); 
+		resize(IMAGE_H*IMAGE_W, &srcData);
+		checkCudaErrors( cudaMemcpy(srcData, image_data_d,  IMAGE_H*IMAGE_W*sizeof(value_type), cudaMemcpyDeviceToDevice) );
         n = c = 1; h = IMAGE_H; w = IMAGE_W;
 		// Perform Forward propagation
        	if (DEBUG) std::cout << "Performing forward propagation ...\n";
-
+ 
+        if (DEBUG) printDeviceVector("input: \n", input.inputs, srcData);
         fullyConnectedForward(input, n, c, h, w, srcData, &dstData);
+        if (DEBUG) printDeviceVector("fullyConnectedforward: \n", input.outputs, dstData);
         activationForward(n, c, h, w, dstData, &srcData);
 		checkCudaErrors( cudaMemcpy(input.output_d, srcData, input.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
         if (DEBUG) printDeviceVector("Hidden layer outputs: \n", n*c*h*w, input.output_d);
 
         fullyConnectedForward(hidden, n, c, h, w, srcData, &dstData);
+        if (DEBUG) printDeviceVector("fullyConnectedforward: \n", hidden.outputs, dstData);
         activationForward(n, c, h, w, dstData, &srcData);
 		checkCudaErrors( cudaMemcpy(hidden.output_d, srcData, hidden.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
 		if (DEBUG) printDeviceVector("Output layer outputs: \n", n*c*h*w, hidden.output_d);
@@ -724,12 +738,12 @@ class network_t
         const int max_digits = hidden.outputs; //n*c*h*w; //10;
         value_type result[max_digits];
         checkCudaErrors( cudaMemcpy(result, srcData, max_digits*sizeof(value_type), cudaMemcpyDeviceToHost) );
+        int id = 0;
         for (int i = 1; i < max_digits; i++){
-            if (result[id] > result[i]) 
+            if (result[id] < result[i]) 
 				id = i;
         }
-		if (DEBUG) std::cout << "Prediction: "<<id << std::endl;
-		
+
         checkCudaErrors( cudaFree(srcData) );
         checkCudaErrors( cudaFree(dstData) );
 		return id;
@@ -738,70 +752,45 @@ class network_t
 	int learnExample(const value_type** image_data, value_type target, const Layer_t& input,
                           const Layer_t& hidden)
     {
-        int n,c,h,w;
-        int id = 0;
+       
 		value_type *image_data_d = NULL;
-        value_type *srcData = NULL, *dstData = NULL, *srcDiffData = NULL, *dstDiffData = NULL, *targetData = NULL;
         value_type imgData_h[IMAGE_H*IMAGE_W];
 
         // Plot to console and normalize image to be in range [0,1]
         for (int i = 0; i < N; i++)
         {
 			imgData_h[i] = (*image_data)[i] / value_type(255);
-			#define DEBUG 0
-			#if DEBUG
+			#if 0
 			std::cout<<(imgData_h[i]>0?"#":" ")<<" ";
 			if (i%IMAGE_W==IMAGE_W-1)
 				std::cout<<std::endl;
 			#endif
         }
-		if (DEBUG) std::cout<<std::endl<<"Target: "<<target<<"\t";
-
-		// Setup Variables for forward propagation
-        checkCudaErrors( cudaMalloc(&srcData, IMAGE_H*IMAGE_W*sizeof(value_type)) ); //resize(IMAGE_H*IMAGE_W, &srcData);
-		checkCudaErrors( cudaMemcpy(srcData, imgData_h, IMAGE_H*IMAGE_W*sizeof(value_type), cudaMemcpyHostToDevice) );
 		resize(IMAGE_H*IMAGE_W, &image_data_d);
-		checkCudaErrors( cudaMemcpy(image_data_d, srcData, IMAGE_H*IMAGE_W*sizeof(value_type), cudaMemcpyDeviceToDevice) );
-        n = c = 1; h = IMAGE_H; w = IMAGE_W;
-		// Perform Forward propagation
-       	if (DEBUG) std::cout << "Performing forward propagation ...\n";
- 
-        fullyConnectedForward(input, n, c, h, w, srcData, &dstData);
-        activationForward(n, c, h, w, dstData, &srcData);
-		checkCudaErrors( cudaMemcpy(input.output_d, srcData, input.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
-        if (DEBUG) printDeviceVector("Hidden layer outputs: \n", n*c*h*w, input.output_d);
-
-        fullyConnectedForward(hidden, n, c, h, w, srcData, &dstData);
-        activationForward(n, c, h, w, dstData, &srcData);
-		checkCudaErrors( cudaMemcpy(hidden.output_d, srcData, hidden.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
-		if (DEBUG) printDeviceVector("Output layer outputs: \n", n*c*h*w, hidden.output_d);
-		
-		// Setup Variables for backward propagation
-        const int max_digits = hidden.outputs; //n*c*h*w; //10;
-        value_type result[max_digits];
-        checkCudaErrors( cudaMemcpy(result, srcData, max_digits*sizeof(value_type), cudaMemcpyDeviceToHost) );
-        for (int i = 1; i < max_digits; i++){
-            if (result[id] > result[i]) 
-				id = i;
-        }
+		checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, IMAGE_H*IMAGE_W*sizeof(value_type), cudaMemcpyHostToDevice) );
+		int id = predictExampleDevice(image_data_d, target, input, hidden);
 		if (DEBUG) std::cout << "Prediction: "<<id << std::endl;
 		
 		
+		value_type *srcDiffData = NULL, *dstDiffData = NULL, *targetData = NULL;
+		int n, c, h, w;
+
 		// Perform backward propagation
 		if (DEBUG) std::cout<<"\nPerforming backward propagation ...\n";
-		c = hidden.outputs; h = w = 1;
+		c = hidden.outputs; n = h = w = 1;
 
 		getBackPropData(hidden, hidden, target, dstDiffData, &targetData, &srcDiffData, true);
 		//THEORY: delW2 = (target-output)*output*(1-output)
 		activationBackward(n, c, h, w, hidden.output_d, targetData, srcDiffData, &dstDiffData);
-		checkCudaErrors( cudaMemcpy(hidden.del_d, srcDiffData, hidden.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
+		checkCudaErrors( cudaMemcpy(hidden.del_d, dstDiffData, hidden.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
 		if (DEBUG) printDeviceVector("delW2: \n", hidden.outputs, hidden.del_d);
 
 		c = input.outputs;
 		getBackPropData(input, hidden, target, dstDiffData, &targetData, &srcDiffData, false);
 		//THEORY: del_W1 = (del_W2*W2')*hidden_output*(1-hidden_output)
+		if (DEBUG) printDeviceVector("\thidden_output: \n", input.outputs, input.output_d);
 		activationBackward(n, c, h, w, input.output_d, targetData, srcDiffData, &dstDiffData); 
-		checkCudaErrors( cudaMemcpy(input.del_d, srcDiffData, input.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
+		checkCudaErrors( cudaMemcpy(input.del_d, dstDiffData, input.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
 		if (DEBUG) printDeviceVector("delW1: \n", input.outputs, input.del_d);
 
 
@@ -810,8 +799,6 @@ class network_t
 
 		// Free Memory
         checkCudaErrors( cudaFree(image_data_d) );
-        checkCudaErrors( cudaFree(srcData) );
-        checkCudaErrors( cudaFree(dstData) );
         checkCudaErrors( cudaFree(srcDiffData) );
         checkCudaErrors( cudaFree(dstDiffData) );
 		checkCudaErrors( cudaFree(targetData) );
@@ -846,13 +833,15 @@ class network_t
 		}else{
 			//THEORY: del_W1 = (del_W2*W2')*hidden_output*(1-hidden_output)
         	value_type alpha = value_type(1), beta = value_type(0);
-			checkCudaErrors( cublasSgemv(cublasHandle, CUBLAS_OP_N,
+			if (DEBUG) printDeviceVector("\tW2: \n", next_layer.inputs*next_layer.outputs, next_layer.data_d);
+			checkCudaErrors( cublasDgemv(cublasHandle, CUBLAS_OP_N,
                                       next_layer.inputs, next_layer.outputs,
                                       &alpha,
                                       next_layer.data_d, next_layer.inputs,
                                       dstDiffData, 1,
                                       &beta,
                                       *srcDiffData, 1) );
+			if (DEBUG) printDeviceVector("\tsrcDiffData: \n", next_layer.inputs, *srcDiffData);
 		}
 	}
 
@@ -968,6 +957,9 @@ int main(int argc, char **argv){
 #endif
     }
 
+	srand(time(NULL));
+	srand(rand());srand(rand());
+
 	// Define and initialize network
 	network_t mnist;
 	Layer_t input(N,100);
@@ -1005,21 +997,27 @@ int main(int argc, char **argv){
 	delete [] training_data;
 	delete [] training_target;
 
+	if (DEBUG) getchar();
+	
 	std::cout<<"\n **** Learning started ****"<<std::endl;
 	// Learn all examples till convergence
-	int num_iterations = 1;
+	int num_iterations = 10;
 	while(num_iterations--){ // Use a better convergence criteria
 		for (int i=0; i<m; i++){
+			if (DEBUG) std::cout<<"\n\n\n\n\n";
 			const value_type *training_example = train_data+i*N;
 			value_type target = train_target[i];
 			value_type predicted = mnist.learnExample(&training_example, target, input, hidden);
+			if (DEBUG) getchar();
+			else if (i%1000==0) std::cout<<"."<<std::flush;
 			//std::cout<<"Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted<<"\n";
 		}
 	}
-	std::cout<<" **** Learning completed ****\n";
+	std::cout<<"\n **** Learning completed ****\n";
 	
 	// Save the weights in a binary file
 
+	std::cout<<"\n **** Testing started ****"<<std::endl;
 	// Read testing data
 	int correct = 0;
 	int n = total_test_data/N;
@@ -1030,8 +1028,10 @@ int main(int argc, char **argv){
 		if (target == predicted){
 			correct++;
 		}
+		if (!DEBUG && i%1000==0) std::cout<<"."<<std::flush;
 		//std::cout<<"Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted<<"\n";
 	}
+	std::cout<<"\n **** Testing completed ****\n";
 
 	std::cout<<"Correctly predicted "<<correct<<" examples out of "<<n<<std::endl;
 
