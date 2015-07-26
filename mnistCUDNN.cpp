@@ -168,16 +168,43 @@ struct Layer_t
         checkCudaErrors( cudaMalloc(&output_d, size_o_ac) );
         checkCudaErrors( cudaMalloc(&del_d, size_o_ac) );
 
-        checkCudaErrors( cudaMemcpy(data_d, data_h, size_ac, cudaMemcpyHostToDevice) );
-        checkCudaErrors( cudaMemcpy(bias_d, bias_h, size_b_ac, cudaMemcpyHostToDevice) );
-        checkCudaErrors( cudaMemcpy(output_d, output_h, size_o_ac, cudaMemcpyHostToDevice) );
-        checkCudaErrors( cudaMemcpy(del_d, del_h, size_o_ac, cudaMemcpyHostToDevice) );
+        copyDataToDevice();
 
 		if (DEBUG){
 			printHostVector("Weights:\n",size, data_h);
 			printHostVector("Bias:\n",size_b, bias_h);
 		}
 	};
+    
+    void copyDataToDevice(){
+        int size = inputs*outputs*kernel_dim*kernel_dim;
+		int size_b = outputs;
+
+		int size_ac = size*sizeof(value_type);
+		int size_b_ac = size_b*sizeof(value_type);
+		int size_o_ac = outputs*sizeof(value_type);
+		
+        checkCudaErrors( cudaMemcpy(data_d, data_h, size_ac, cudaMemcpyHostToDevice) );
+        checkCudaErrors( cudaMemcpy(bias_d, bias_h, size_b_ac, cudaMemcpyHostToDevice) );
+        checkCudaErrors( cudaMemcpy(output_d, output_h, size_o_ac, cudaMemcpyHostToDevice) );
+        checkCudaErrors( cudaMemcpy(del_d, del_h, size_o_ac, cudaMemcpyHostToDevice) );
+    }
+    
+    void copyDataToHost(){
+        int size = inputs*outputs*kernel_dim*kernel_dim;
+		int size_b = outputs;
+
+		int size_ac = size*sizeof(value_type);
+		int size_b_ac = size_b*sizeof(value_type);
+		int size_o_ac = outputs*sizeof(value_type);
+		
+        checkCudaErrors( cudaMemcpy(data_h, data_d, size_ac, cudaMemcpyDeviceToHost) );
+        checkCudaErrors( cudaMemcpy(bias_h, bias_d, size_b_ac, cudaMemcpyDeviceToHost) );
+        checkCudaErrors( cudaMemcpy(output_h, output_d, size_o_ac, cudaMemcpyDeviceToHost) );
+        checkCudaErrors( cudaMemcpy(del_h, del_d, size_o_ac, cudaMemcpyDeviceToHost) );
+    }
+
+
 
     ~Layer_t()
     {
@@ -947,6 +974,26 @@ inline bool IsAppBuiltAs64()
 #endif
 }
 
+bool loadWeights(const char* filename, size_t size, value_type* matrix){
+    std::ifstream myfile(filename, std::ios::in | std::ios::binary);
+    if (myfile.is_open()){
+        myfile.read((char*)matrix, size*sizeof(value_type));
+    }else{
+        std::cout<<"Error reading file "<<filename<<std::endl;
+        return false;
+    }
+}
+
+bool saveWeights(const char* filename, size_t size, value_type* matrix){
+    std::ofstream myfile(filename, std::ios::out | std::ios::binary);
+    if (myfile.is_open()){
+        myfile.write((char*)matrix, size*sizeof(value_type));
+    }else{
+        std::cout<<"Error saving file "<<filename<<std::endl;
+        return false;
+    }
+}
+
 
 int main(int argc, char **argv){	
 	if(sizeof(void*) != 8)
@@ -998,24 +1045,42 @@ int main(int argc, char **argv){
 	delete [] training_target;
 
 	if (DEBUG) getchar();
-	
-	std::cout<<"\n **** Learning started ****"<<std::endl;
-	// Learn all examples till convergence
-	int num_iterations = 10;
-	while(num_iterations--){ // Use a better convergence criteria
-		for (int i=0; i<m; i++){
-			if (DEBUG) std::cout<<"\n\n\n\n\n";
-			const value_type *training_example = train_data+i*N;
-			value_type target = train_target[i];
-			value_type predicted = mnist.learnExample(&training_example, target, input, hidden);
-			if (DEBUG) getchar();
-			else if (i%1000==0) std::cout<<"."<<std::flush;
-			//std::cout<<"Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted<<"\n";
-		}
-	}
-	std::cout<<"\n **** Learning completed ****\n";
-	
-	// Save the weights in a binary file
+    
+    if (
+	    loadWeights("input_data.bin", input.inputs*input.outputs, input.data_h) &&
+	    loadWeights("input_bias.bin", input.outputs, input.bias_h) &&
+	    loadWeights("hidden_data.bin", hidden.inputs*hidden.outputs, hidden.data_h) &&
+	    loadWeights("hidden_bias.bin", hidden.outputs, hidden.bias_h)
+    ){
+ 	
+        input.copyDataToDevice();
+        hidden.copyDataToDevice();
+        std::cout<<"Weights from file loaded"<<std::endl;
+    }else{
+        std::cout<<"\n **** Learning started ****"<<std::endl;
+        // Learn all examples till convergence
+        int num_iterations = 5;
+        while(num_iterations--){ // Use a better convergence criteria
+            for (int i=0; i<m; i++){
+                if (DEBUG) std::cout<<"\n\n\n\n\n";
+                const value_type *training_example = train_data+i*N;
+                value_type target = train_target[i];
+                value_type predicted = mnist.learnExample(&training_example, target, input, hidden);
+                if (DEBUG) getchar();
+                else if (i%1000==0) std::cout<<"."<<std::flush;
+                //std::cout<<"Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted<<"\n";
+            }
+        }
+        std::cout<<"\n **** Learning completed ****\n";
+	    
+        input.copyDataToHost();
+        hidden.copyDataToHost();
+	    // Save the weights in a binary file
+	    saveWeights("input_data.bin", input.inputs*input.outputs, input.data_h);
+	    saveWeights("input_bias.bin", input.outputs, input.bias_h);
+	    saveWeights("hidden_data.bin", hidden.inputs*hidden.outputs, hidden.data_h);
+	    saveWeights("hidden_bias.bin", hidden.outputs, hidden.bias_h);
+    }
 
 	std::cout<<"\n **** Testing started ****"<<std::endl;
 	// Read testing data

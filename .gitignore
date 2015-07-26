@@ -3,3 +3,4 @@ data/
 mnistCUDNN
 *.o
 *.log
+*.bin
