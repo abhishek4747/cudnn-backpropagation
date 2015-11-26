@@ -21,6 +21,7 @@
 #include <vector>
 #include <algorithm>
 #include <iomanip>
+#include <ctime>
 
 #include <cublas_v2.h>
 #include <cudnn.h>
@@ -1005,7 +1006,7 @@ int main(int argc, char **argv){
     }
 
 	srand(time(NULL));
-	srand(rand());srand(rand());
+	//srand(rand());srand(rand());
 
 	// Define and initialize network
 	network_t mnist;
@@ -1058,6 +1059,9 @@ int main(int argc, char **argv){
         std::cout<<"Weights from file loaded"<<std::endl;
     }else{
         std::cout<<"\n **** Learning started ****"<<std::endl;
+        std::clock_t    start;
+        start = std::clock(); 
+
         // Learn all examples till convergence
         int num_iterations = 5;
         while(num_iterations--){ // Use a better convergence criteria
@@ -1072,6 +1076,7 @@ int main(int argc, char **argv){
             }
         }
         std::cout<<"\n **** Learning completed ****\n";
+        std::cout << "Learning Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second" << std::endl;
 	    
         input.copyDataToHost();
         hidden.copyDataToHost();
@@ -1083,6 +1088,10 @@ int main(int argc, char **argv){
     }
 
 	std::cout<<"\n **** Testing started ****"<<std::endl;
+
+    std::clock_t    start;
+    start = std::clock(); 
+
 	// Read testing data
 	int correct = 0;
 	int n = total_test_data/N;
@@ -1097,7 +1106,7 @@ int main(int argc, char **argv){
 		//std::cout<<"Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted<<"\n";
 	}
 	std::cout<<"\n **** Testing completed ****\n";
-
+    std::cout << "Testing Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second" << std::endl;
 	std::cout<<"Correctly predicted "<<correct<<" examples out of "<<n<<std::endl;
 
 
