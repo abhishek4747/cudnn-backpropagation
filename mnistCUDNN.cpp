@@ -39,13 +39,37 @@
 #include "gemv.h"
 #include "error_util.h"
 
-#define IMAGE_H 28
-#define IMAGE_W 28
-#define N (IMAGE_H*IMAGE_W)  // dimension of training data
+/******************** MACROS **************************/
 
-/********************************************************
- * Prints the error message, and exits
- * ******************************************************/
+// #define MATRIX_DATA_TYPE_FLOAT
+#define MATRIX_DATA_TYPE_DOUBLE
+
+#ifdef MATRIX_DATA_TYPE_FLOAT
+#define MATRIX_DATA_TYPE float
+#else
+#ifdef MATRIX_DATA_TYPE_DOUBLE
+#define MATRIX_DATA_TYPE double
+#endif
+#endif
+
+#ifndef MATRIX_DATA_TYPE
+#error "MATRIX_DATA_TYPE not defined"
+#endif
+
+#if defined(MATRIX_DATA_TYPE_FLOAT)
+	#define CUBLAS_GEMM cublasSgemm
+ 	#define CUBLAS_GEAM cublasSgeam
+ 	#define CUBLAS_GEMV cublasSgemv
+#elif defined(MATRIX_DATA_TYPE_DOUBLE)
+	#define CUBLAS_GEMM cublasDgemm
+ 	#define CUBLAS_GEAM cublasDgeam
+ 	#define CUBLAS_GEMV cublasDgemv
+#endif
+
+
+#define IMAGE_H (28)
+#define IMAGE_W (28)
+#define N (IMAGE_H*IMAGE_W)  // dimension of training data
 
 #define minn(a,b) (a<b?a:b)
 #define maxx(a,b) (a>b?a:b)
@@ -109,7 +133,9 @@ void printDeviceVector(std::string str, int size, value_type* vec_d)
 // Also when one needs to use float instead of half, e.g. for printing
 template <typename T> 
 struct ScaleFactorTypeMap { typedef T Type;};
-template <> struct ScaleFactorTypeMap<half1>  { typedef float Type;};
+
+template <> 
+struct ScaleFactorTypeMap<half1>  { typedef float Type;};
 
 // float/double <-> half conversion class
 template <class value_type>
@@ -612,7 +638,8 @@ class network_t
 			println("Testing cudnnFindConvolutionForwardAlgorithm ...");
 			int requestedAlgoCount = 5; 
 			int returnedAlgoCount[1];
-			cudnnConvolutionFwdAlgoPerf_t *results = (cudnnConvolutionFwdAlgoPerf_t*)malloc(sizeof(cudnnConvolutionFwdAlgoPerf_t)*requestedAlgoCount);
+			cudnnConvolutionFwdAlgoPerf_t *results = (cudnnConvolutionFwdAlgoPerf_t*)malloc(
+				sizeof(cudnnConvolutionFwdAlgoPerf_t)*requestedAlgoCount);
 			checkCUDNN(cudnnFindConvolutionForwardAlgorithm( cudnnHandle, 
 													 srcTensorDesc,
 													 filterDesc,
@@ -622,9 +649,11 @@ class network_t
 													 returnedAlgoCount,
 													 results
 												   ) );
-		for(int algoIndex = 0; algoIndex < *returnedAlgoCount; ++algoIndex){
-			printf("^^^^ %s for Algo %d: %f time requiring %llu memory\n", cudnnGetErrorString(results[algoIndex].status), results[algoIndex].algo, results[algoIndex].time, (unsigned long long)results[algoIndex].memory);
-		}
+			for(int algoIndex = 0; algoIndex < *returnedAlgoCount; ++algoIndex){
+				printf("^^^^ %s for Algo %d: %f time requiring %llu memory\n", 
+					cudnnGetErrorString(results[algoIndex].status), results[algoIndex].algo, results[algoIndex].time, 
+					(unsigned long long)results[algoIndex].memory);
+			}
 			free(results);
 		}
 		else
@@ -800,7 +829,7 @@ class network_t
 											dstTensorDesc,
 											*dstData) );    
 	}
-	void fullyConnectedBackward(const Layer_t<double>& current_layer, const value_type* last_input){
+	void fullyConnectedBackward(const Layer_t<value_type>& current_layer, const value_type* last_input){
 		int dim_x = current_layer.inputs;
 		int dim_y = current_layer.outputs;
 		int dim_z = 1;
@@ -812,7 +841,7 @@ class network_t
 		//if (DEBUG) printDeviceVector("last_input: \n", current_layer.inputs, last_input);
 		//if (DEBUG) printDeviceVector("del_W: \n", current_layer.outputs, current_layer.del_d);
 		
-		checkCudaErrors( cublasDgemm(cublasHandle, 
+		checkCudaErrors( CUBLAS_GEMM(cublasHandle, 
 									  CUBLAS_OP_N, CUBLAS_OP_N,
 									  dim_x, dim_y, dim_z,
 									  &alpha,
@@ -831,7 +860,7 @@ class network_t
 		// C = 0.1 * delta_W2 + C
 		if (DEBUG) printDeviceVector("\tW = W + 0.1*delta_W: old\n", dim_x*dim_y, current_layer.data_d);
 		
-		checkCudaErrors( cublasDgeam(cublasHandle,
+		checkCudaErrors( CUBLAS_GEAM(cublasHandle,
 										CUBLAS_OP_N, CUBLAS_OP_N,
 										dim_x, dim_y,
 										&alpha,
@@ -846,7 +875,7 @@ class network_t
 		const value_type* B2 = current_layer.bias_d;
 		if (DEBUG) printDeviceVector("\tdel_W:\n", current_layer.outputs, current_layer.del_d);
 		if (DEBUG) printDeviceVector("\tB = B + 0.1*del_W: old\n", current_layer.outputs, current_layer.bias_d);
-		checkCudaErrors( cublasDgeam(cublasHandle,
+		checkCudaErrors( CUBLAS_GEAM(cublasHandle,
 										CUBLAS_OP_N, CUBLAS_OP_N,
 										dim_x, dim_y,
 										&alpha,
@@ -957,7 +986,7 @@ class network_t
 		return id;
 	}
 
-	int predictExample(const value_type** image_data, value_type target, const Layer_t<double>& input, const Layer_t<double>& hidden){
+	int predictExample(const value_type** image_data, value_type target, const Layer_t<value_type>& input, const Layer_t<value_type>& hidden){
 		
 		value_type *image_data_d = NULL;
 		value_type imgData_h[IMAGE_H*IMAGE_W];
@@ -980,7 +1009,7 @@ class network_t
 	}
 
 
-	int predictExampleDevice(const value_type* image_data_d, value_type target, const Layer_t<double>& input, const Layer_t<double>& hidden){
+	int predictExampleDevice(const value_type* image_data_d, value_type target, const Layer_t<value_type>& input, const Layer_t<value_type>& hidden){
 		int n,c,h,w;
 		value_type *srcData = NULL, *dstData = NULL;
 		if (DEBUG) println("\nTarget: "<<target);
@@ -1021,8 +1050,8 @@ class network_t
 		return id;
 	}
 
-	int learnExample(const value_type** image_data, value_type target, const Layer_t<double>& input,
-						  const Layer_t<double>& hidden)
+	int learnExample(const value_type** image_data, value_type target, const Layer_t<value_type>& input,
+						  const Layer_t<value_type>& hidden)
 	{
 	   
 		value_type *image_data_d = NULL;
@@ -1077,7 +1106,7 @@ class network_t
 		return id;
 	}
 	
-	void getBackPropData(const Layer_t<double>& layer, const Layer_t<double>& next_layer, value_type target, value_type* dstDiffData, 
+	void getBackPropData(const Layer_t<value_type>& layer, const Layer_t<value_type>& next_layer, value_type target, value_type* dstDiffData, 
 			value_type** targetData, value_type** srcDiffData, 
 			bool last_layer)
 	{
@@ -1105,7 +1134,7 @@ class network_t
 			//THEORY: del_W1 = (del_W2*W2')*hidden_output*(1-hidden_output)
 			value_type alpha = value_type(1), beta = value_type(0);
 			if (DEBUG) printDeviceVector("\tW2: \n", next_layer.inputs*next_layer.outputs, next_layer.data_d);
-			checkCudaErrors( cublasDgemv(cublasHandle, CUBLAS_OP_N,
+			checkCudaErrors( CUBLAS_GEMV(cublasHandle, CUBLAS_OP_N,
 									  next_layer.inputs, next_layer.outputs,
 									  &alpha,
 									  next_layer.data_d, next_layer.inputs,
@@ -1126,6 +1155,7 @@ class network_t
 		total_test_size = 0;
 		std::string fname;
 		std::stringstream error_s;
+
 		// Calculate total training and testing size
 		for (int t=0; t<2; t++){
 			name = t==0?"train":"test";
@@ -1254,8 +1284,8 @@ bool saveWeights(const char* filename, size_t size, value_type* matrix){
 
 int main(int argc, char *argv[])
 {   
-	// Define the precision you want to use: half (fp16), full (float), double (double)
-	typedef double value_type;
+	// Define the precision you want to use: full (float), double (double)
+	typedef MATRIX_DATA_TYPE value_type;
 
 	// Print Usage if help is in the arguments
 	if (checkCmdLineFlag(argc, (const char **)argv, "help"))
@@ -1327,7 +1357,6 @@ int main(int argc, char *argv[])
 		}
 		train_target[i] = training_target[perm[i]];
 	}
-
 	println("Training Examples shuffled.");
 
 	// Free some variables
@@ -1335,17 +1364,16 @@ int main(int argc, char *argv[])
 	delete [] training_target;
 
 	// Try to load learned weights from file other wise start learning phase
-	if (
-		loadWeights("input_data.bin", input.inputs*input.outputs, input.data_h) &&
+	if (loadWeights("input_data.bin", input.inputs*input.outputs, input.data_h) &&
 		loadWeights("input_bias.bin", input.outputs, input.bias_h) &&
 		loadWeights("hidden_data.bin", hidden.inputs*hidden.outputs, hidden.data_h) &&
-		loadWeights("hidden_bias.bin", hidden.outputs, hidden.bias_h)
-	){
-
+		loadWeights("hidden_bias.bin", hidden.outputs, hidden.bias_h))
+	{
 		input.copyDataToDevice();
 		hidden.copyDataToDevice();
 		println("Weights from file loaded");
-	}else{
+	}
+	else{
 		println("\n **** Learning started ****");
 		std::clock_t    start;
 		start = std::clock(); 

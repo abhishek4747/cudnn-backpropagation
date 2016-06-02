@@ -3,3 +3,4 @@ tags
 mnistCUDNN
 *.o
 *.log
+*.bin
