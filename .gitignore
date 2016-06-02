@@ -1,6 +1,5 @@
 *.swp
-data/
+tags
 mnistCUDNN
 *.o
 *.log
-*.bin

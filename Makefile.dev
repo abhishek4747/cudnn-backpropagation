@@ -1,0 +1,112 @@
+ifndef OS
+OS := $(shell uname)
+endif
+ifeq ($(OS), Windows_NT)
+OS := win32
+endif
+ifeq ($(OS), Linux)
+OS := linux
+endif
+ifeq ($(OS), Darwin)
+OS := darwin
+endif
+
+TARGET_ARCH ?= x86_64
+FREEIMAGE_SUBDIR := $(TARGET_ARCH)
+
+CUDNN_LIB = -lcudnn
+
+ifeq ($(VULCAN), 1)
+NVCC ?= $(VULCAN_INSTALL_DIR)/cuda/bin/nvcc
+else
+NVCC ?= nvcc
+endif
+
+ifeq ($(OS), linux)
+CC ?= g++
+CUDA_LIBSUBDIR := lib64
+  ifeq ($(TARGET_ARCH), ppc64le)
+    CUDA_LIBSUBDIR := targets/ppc64le-linux/lib
+  endif
+endif
+ifeq ($(OS), darwin)
+CC := clang++
+CUDA_LIBSUBDIR := lib
+FREEIMAGE_SUBDIR :=
+endif
+NVCC_OPTIONS ?=
+
+ifeq ($(VULCAN), 1)
+CUDA_PATH = $(VULCAN_INSTALL_DIR)/cuda
+CUDA_LIB_PATH = $(CUDA_PATH)/$(CUDA_LIBSUBDIR)
+CUDNN_LIB_PATH = $(CUDA_PATH)/$(CUDA_LIBSUBDIR)
+CUDNN_INCLUDE_PATH = $(VULCAN_INSTALL_DIR)/cuda/include
+else
+CUDA_PATH = /usr/local/cuda
+CUDA_LIB_PATH = $(CUDA_PATH)/$(CUDA_LIBSUBDIR)
+CUDNN_LIB_PATH = $(CUDA_PATH)/cudnn
+CUDNN_INCLUDE_PATH = $(CUDA_PATH)/cudnn
+endif
+
+# Linux - ppc64le cross compiler
+ifeq ($(TARGET_ARCH), ppc64le)
+  ifdef VULCAN_TOOLS_BASE
+    CC := $(VULCAN_TOOLS_BASE)/unix/hosts/Linux-x86/targets/Linux-ppc64le/gcc-4.8.3/bin/powerpc64le-linux-gnu-g++
+  else
+    CC := powerpc64le-linux-gnu-g++
+  endif
+endif
+# Linux - aarch64 cross compiler
+ifeq ($(TARGET_ARCH), aarch64)
+  CC := aarch64-linux-gnu-g++
+endif
+# Linux - ARMv7 cross compiler
+ifeq ($(TARGET_ARCH), ARMv7)
+  FREEIMAGE_SUBDIR := armv7l
+  NVCC_OPTIONS := -m32
+  CUDA_LIB_PATH := $(CUDA_PATH)/lib
+  ifdef VULCAN_TOOLS_BASE
+    CC := $(VULCAN_TOOLS_BASE)/linux/crosstool-ng/arm-cortex_a9-linux-gnueabi/gcc-4.6.3-glibc-2.11.3-hard/bin/arm-cortex_a9-linux-gnueabi-g++
+  else
+    CC := arm-cortex_a9-linux-gnueabi-g++
+  endif
+endif
+
+CFLAGS = -I. -I$(CUDA_PATH)/include -I$(CUDNN_INCLUDE_PATH) -IFreeImage/include -IUtilNPP
+LIBS = -Wl,-rpath,$(CUDNN_LIB_PATH) -lcudart -lnppi -lnppc -lcublas $(CUDNN_LIB) -lfreeimage -lm -lstdc++
+LFLAGS = -L$(CUDA_LIB_PATH) -L$(CUDNN_LIB_PATH) -L./FreeImage/lib/$(OS)/$(FREEIMAGE_SUBDIR) $(LIBS)
+
+ifeq ($(TARGET_ARCH), ARMv7)
+  CFLAGS += -march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard
+endif
+ifeq ($(TARGET_ARCH), ppc64le)
+  CFLAGS += -I$(CUDA_PATH)/targets/ppc64le-linux/include
+endif
+
+ifdef CC
+CCBIN := -ccbin $(CC)
+endif
+
+OBJ = fp16_dev.o fp16_emu.o mnistCUDNN.o
+
+%.o: %.cpp
+	$(CC) -c -o $@ $< $(CFLAGS)
+
+%.o: %.cu
+	$(NVCC) $(CCBIN) $(NVCC_OPTIONS) -gencode arch=compute_35,code=sm_35 -arch=sm_30 -gencode arch=compute_52,code=sm_52 -lineinfo -c -o $@ $<
+
+
+ifeq ($(OS), win32)
+mnistCUDNN:
+ifdef VULCAN_INSTALL_DIR
+	MSBUILD_UTIL.bat mnistCUDNN_vs2010.sln x64 Release $(VULCAN_INSTALL_DIR)
+endif
+else
+mnistCUDNN: $(OBJ)
+	$(CC) -o $@ $^ $(LFLAGS)
+endif
+
+clean:
+ifneq ($(OS), win32)
+	rm -rf *.o mnistCUDNN
+endif

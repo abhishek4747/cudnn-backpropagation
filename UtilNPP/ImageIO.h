@@ -80,6 +80,7 @@ namespace npp
         // swap the user given image with our result image, effecively
         // moving our newly loaded image data into the user provided shell
         oImage.swap(rImage);
+        FreeImage_Unload(pBitmap);
     }
 
     // Save an gray-scale image to disk.
