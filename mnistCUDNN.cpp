@@ -39,7 +39,9 @@
 #include "gemv.h"
 #include "error_util.h"
 
-/******************** MACROS **************************/
+/******************************************************************************
+ * MACROS
+ *****************************************************************************/
 
 // #define MATRIX_DATA_TYPE_FLOAT
 #define MATRIX_DATA_TYPE_DOUBLE
@@ -91,7 +93,6 @@
 	#define vprintln(a)
 #endif
 
-
 #ifdef DEBUG
 	#define dprint(a) print(a)
 	#define dprintln(a) println(a)
@@ -101,6 +102,10 @@
 #endif
 
 #define EXIT_WAIVED 0
+
+/******************************************************************************
+ * HELPER FUNCTIONS for classes
+ *****************************************************************************/
 
 void get_path(std::string& sFilename, const char *fname, const char *pname)
 {
@@ -127,7 +132,6 @@ void printDeviceVector(std::string str, int size, value_type* vec_d)
 	printHostVector(str, size, vec);
 	delete [] vec;
 }
-
 
 // Need the map, since scaling factor is of float type in half precision
 // Also when one needs to use float instead of half, e.g. for printing
@@ -246,11 +250,20 @@ void printDeviceVector(int size, value_type* vec_d)
 	delete [] vec;
 }
 
+/******************************************************************************
+ * Where to perform fp16 calculation (most probably deprecated)
+ *****************************************************************************/
+
 typedef enum {
 		FP16_HOST  = 0, 
 		FP16_CUDA  = 1,
 		FP16_CUDNN = 2
  } fp16Import_t;
+
+
+/******************************************************************************
+ * Layer_t struct : contains information about layers
+ *****************************************************************************/
 template <class value_type>
 struct Layer_t
 {
@@ -426,7 +439,10 @@ void Layer_t<half1>::readAllocInit(const char* fname, int size, half1** data_h, 
 	}
 }
 
-// demonstrate different ways of setting tensor descriptor
+/******************************************************************************
+ * demonstrate different ways of setting tensor descriptor
+ *****************************************************************************/
+
 //#define SIMPLE_TENSOR_DESCRIPTOR
 #define ND_TENSOR_DESCRIPTOR
 void setTensorDesc(cudnnTensorDescriptor_t& tensorDesc, 
@@ -462,6 +478,10 @@ void setTensorDesc(cudnnTensorDescriptor_t& tensorDesc,
 #endif
 }
 
+/******************************************************************************
+ * network_t class : contains all learning functions
+ *****************************************************************************/
+
 template <class value_type>
 class network_t
 {
@@ -477,6 +497,7 @@ class network_t
 	cudnnActivationDescriptor_t  activDesc;
 	cudnnLRNDescriptor_t   normDesc;
 	cublasHandle_t cublasHandle;
+
 	void createHandles()
 	{
 		checkCUDNN( cudnnCreate(&cudnnHandle) );
@@ -490,9 +511,10 @@ class network_t
 		checkCUDNN( cudnnCreatePoolingDescriptor(&poolingDesc) );
 		checkCUDNN( cudnnCreateActivationDescriptor(&activDesc) );
 		checkCUDNN( cudnnCreateLRNDescriptor(&normDesc) );
-
+	
 		checkCublasErrors( cublasCreate(&cublasHandle) );
 	}
+
 	void destroyHandles()
 	{
 		checkCUDNN( cudnnDestroyLRNDescriptor(normDesc) );
@@ -523,10 +545,12 @@ class network_t
 		tensorFormat = CUDNN_TENSOR_NCHW;
 		createHandles();    
 	};
+
 	~network_t()
 	{
 		destroyHandles();
 	}
+	
 	void resize(int size, value_type **data)
 	{
 		if (*data != NULL)
@@ -535,10 +559,12 @@ class network_t
 		}
 		checkCudaErrors( cudaMalloc(data, size*sizeof(value_type)) );
 	}
+	
 	void setConvolutionAlgorithm(const cudnnConvolutionFwdAlgo_t& algo)
 	{
 		convAlgorithm = (int) algo;
 	}
+	
 	void addBias(const cudnnTensorDescriptor_t& dstTensorDesc, const Layer_t<value_type>& layer, int c, value_type *data)
 	{
 		setTensorDesc(biasTensorDesc, tensorFormat, dataType, 1, c, 1, 1);
@@ -552,6 +578,7 @@ class network_t
 									dstTensorDesc,
 									data) );
 	}
+
 	void fullyConnectedForward(const Layer_t<value_type>& ip,
 						  int& n, int& c, int& h, int& w,
 						  value_type* srcData, value_type** dstData)
@@ -573,6 +600,7 @@ class network_t
 
 		h = 1; w = 1; c = dim_y;
 	}
+
 	void convoluteForward(const Layer_t<value_type>& conv,
 						  int& n, int& c, int& h, int& w,
 						  value_type* srcData, value_type** dstData)
@@ -741,6 +769,7 @@ class network_t
 										  dstTensorDesc,
 										  *dstData) );
 	}
+
 	void softmaxForward(int n, int c, int h, int w, value_type* srcData, value_type** dstData)
 	{
 		resize(n*c*h*w, dstData);
@@ -786,26 +815,9 @@ class network_t
 											srcData,
 											&beta,
 											dstTensorDesc,
-									
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 											*dstData) );
 	}
+
 	void activationForward(int n, int c, int h, int w, value_type* srcData, value_type** dstData)
 	{
 		checkCUDNN( cudnnSetActivationDescriptor(activDesc,
@@ -829,6 +841,7 @@ class network_t
 											dstTensorDesc,
 											*dstData) );    
 	}
+
 	void fullyConnectedBackward(const Layer_t<value_type>& current_layer, const value_type* last_input){
 		int dim_x = current_layer.inputs;
 		int dim_y = current_layer.outputs;
@@ -887,6 +900,7 @@ class network_t
 
 		checkCudaErrors( cudaFree(dstData));
 	}
+
 	void activationBackward(int n, int c, int h, int w, value_type* srcData, value_type* dstData, value_type *srcDiffData, value_type **dstDiffData)
 	{
 		checkCUDNN( cudnnSetActivationDescriptor(activDesc,
@@ -1007,7 +1021,6 @@ class network_t
 		checkCudaErrors( cudaFree(image_data_d) );
 		return id;
 	}
-
 
 	int predictExampleDevice(const value_type* image_data_d, value_type target, const Layer_t<value_type>& input, const Layer_t<value_type>& hidden){
 		int n,c,h,w;
@@ -1252,6 +1265,10 @@ void network_t<half1>::fullyConnectedForward(const Layer_t<half1>& ip,
 }
 #endif
 
+/******************************************************************************
+ * HELPER FUNCTIONS for main()
+ *****************************************************************************/
+
 void displayUsage()
 {
 	printf( "mnistCUDNN {<options>}\n");
@@ -1281,6 +1298,10 @@ bool saveWeights(const char* filename, size_t size, value_type* matrix){
 		return false;
 	}
 }
+
+/******************************************************************************
+ * MAIN() function
+ *****************************************************************************/
 
 int main(int argc, char *argv[])
 {   
