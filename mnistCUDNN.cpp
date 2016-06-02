@@ -39,26 +39,9 @@
 #include "gemv.h"
 #include "error_util.h"
 
-#define MATRIX_DATA_TYPE double
-
 #define IMAGE_H 28
 #define IMAGE_W 28
 #define N (IMAGE_H*IMAGE_W)  // dimension of training data
-
-
-
-const char *first_image = "one_28x28.pgm";
-const char *second_image = "three_28x28.pgm";
-const char *third_image = "five_28x28.pgm";
-
-const char *conv1_bin = "conv1.bin";
-const char *conv1_bias_bin = "conv1.bias.bin";
-const char *conv2_bin = "conv2.bin";
-const char *conv2_bias_bin = "conv2.bias.bin";
-const char *ip1_bin = "ip1.bin";
-const char *ip1_bias_bin = "ip1.bias.bin";
-const char *ip2_bin = "ip2.bin";
-const char *ip2_bias_bin = "ip2.bias.bin";
 
 /********************************************************
  * Prints the error message, and exits
@@ -95,28 +78,28 @@ const char *ip2_bias_bin = "ip2.bias.bin";
 
 #define EXIT_WAIVED 0
 
-
 void get_path(std::string& sFilename, const char *fname, const char *pname)
 {
 	sFilename = (std::string("datav5/") + std::string(fname));
 }
 
-void printHostVector(std::string str, int size, MATRIX_DATA_TYPE* vec){
-	std::cout << str ;
+template <typename value_type> 
+void printHostVector(std::string str, int size, value_type* vec){
+	print(str);
 	for (int i = 0; i < minn(size,400); i++)
 	{
-		std::cout << std::setprecision(2) << vec[i] << " ";
+		print(std::setprecision(2) << vec[i] << " ");
 	}
-	std::cout << std::endl; 
+	println(" "); 
 }
 
-
-void printDeviceVector(std::string str, int size, MATRIX_DATA_TYPE* vec_d)
+template <typename value_type>
+void printDeviceVector(std::string str, int size, value_type* vec_d)
 {
-	MATRIX_DATA_TYPE *vec;
-	vec = new MATRIX_DATA_TYPE[size];
+	value_type *vec;
+	vec = new value_type[size];
 	cudaDeviceSynchronize();
-	cudaMemcpy(vec, vec_d, size*sizeof(MATRIX_DATA_TYPE), cudaMemcpyDeviceToHost);
+	cudaMemcpy(vec, vec_d, size*sizeof(value_type), cudaMemcpyDeviceToHost);
 	printHostVector(str, size, vec);
 	delete [] vec;
 }
@@ -195,7 +178,7 @@ void readImage(const char* fname, value_type* imgData_h)
 	// declare a host image object for an 8-bit grayscale image
 	npp::ImageCPU_8u_C1 oHostSrc;
 	std::string sFilename(fname);
-	std::cout << "Loading image " << sFilename << std::endl;
+	println("Loading image " << sFilename);
 	// Take care of half precision
 	Convert<value_type> fromReal;
 	// load gray-scale image from disk
@@ -231,9 +214,9 @@ void printDeviceVector(int size, value_type* vec_d)
 	std::cout.setf( std::ios::fixed, std:: ios::floatfield );
 	for (int i = 0; i < size; i++)
 	{
-		std::cout << toReal(vec[i]) << " ";
+		print(toReal(vec[i]) << " ");
 	}
-	std::cout << std::endl;
+	println(" ");
 	delete [] vec;
 }
 
@@ -252,8 +235,8 @@ struct Layer_t
 	int kernel_dim;
 	value_type *data_h, *data_d;
 	value_type *bias_h, *bias_d;
-	MATRIX_DATA_TYPE *output_h, *output_d;
-	MATRIX_DATA_TYPE *del_h, *del_d;
+	value_type *output_h, *output_d;
+	value_type *del_h, *del_d;
 
 	Layer_t() : data_h(NULL), data_d(NULL), bias_h(NULL), bias_d(NULL), 
 				inputs(0), outputs(0), kernel_dim(0), fp16Import(FP16_HOST){};
@@ -282,19 +265,19 @@ struct Layer_t
 		int size = inputs*outputs*kernel_dim*kernel_dim;
 		int size_b = outputs;
 
-		int size_ac = size*sizeof(MATRIX_DATA_TYPE);
-		int size_b_ac = size_b*sizeof(MATRIX_DATA_TYPE);
-		int size_o_ac = outputs*sizeof(MATRIX_DATA_TYPE);
-		data_h = new MATRIX_DATA_TYPE[size];
-		bias_h = new MATRIX_DATA_TYPE[size_b];
-		output_h = new MATRIX_DATA_TYPE[outputs];
-		del_h = new MATRIX_DATA_TYPE[outputs];
+		int size_ac = size*sizeof(value_type);
+		int size_b_ac = size_b*sizeof(value_type);
+		int size_o_ac = outputs*sizeof(value_type);
+		data_h = new value_type[size];
+		bias_h = new value_type[size_b];
+		output_h = new value_type[outputs];
+		del_h = new value_type[outputs];
 
 		// Random Initialization
 		for (int i=0; i<size; i++)
-			data_h[i] = (((MATRIX_DATA_TYPE)rand())/(rand()+1))/100000;
+			data_h[i] = (((value_type)rand())/(rand()+1))/100000;
 		for (int i=0; i<size_b; i++)
-			bias_h[i] = (((MATRIX_DATA_TYPE)rand())/(rand()+1))/100000;			
+			bias_h[i] = (((value_type)rand())/(rand()+1))/100000;			
 		for (int i=0; i<outputs; i++){
 			output_h[i]=0;
 			del_h[i]=0;
@@ -325,9 +308,9 @@ struct Layer_t
 		int size = inputs*outputs*kernel_dim*kernel_dim;
 		int size_b = outputs;
 
-		int size_ac = size*sizeof(MATRIX_DATA_TYPE);
-		int size_b_ac = size_b*sizeof(MATRIX_DATA_TYPE);
-		int size_o_ac = outputs*sizeof(MATRIX_DATA_TYPE);
+		int size_ac = size*sizeof(value_type);
+		int size_b_ac = size_b*sizeof(value_type);
+		int size_o_ac = outputs*sizeof(value_type);
 		
 		checkCudaErrors( cudaMemcpy(data_d, data_h, size_ac, cudaMemcpyHostToDevice) );
 		checkCudaErrors( cudaMemcpy(bias_d, bias_h, size_b_ac, cudaMemcpyHostToDevice) );
@@ -339,9 +322,9 @@ struct Layer_t
 		int size = inputs*outputs*kernel_dim*kernel_dim;
 		int size_b = outputs;
 
-		int size_ac = size*sizeof(MATRIX_DATA_TYPE);
-		int size_b_ac = size_b*sizeof(MATRIX_DATA_TYPE);
-		int size_o_ac = outputs*sizeof(MATRIX_DATA_TYPE);
+		int size_ac = size*sizeof(value_type);
+		int size_b_ac = size_b*sizeof(value_type);
+		int size_o_ac = outputs*sizeof(value_type);
 		
 		checkCudaErrors( cudaMemcpy(data_h, data_d, size_ac, cudaMemcpyDeviceToHost) );
 		checkCudaErrors( cudaMemcpy(bias_h, bias_d, size_b_ac, cudaMemcpyDeviceToHost) );
@@ -612,7 +595,7 @@ class network_t
 		if (convAlgorithm < 0)
 		{
 			// Choose the best according to the preference
-			std::cout << "Testing cudnnGetConvolutionForwardAlgorithm ...\n";
+			println("Testing cudnnGetConvolutionForwardAlgorithm ...");
 			checkCUDNN( cudnnGetConvolutionForwardAlgorithm(cudnnHandle,
 													srcTensorDesc,
 													filterDesc,
@@ -622,11 +605,11 @@ class network_t
 													0,
 													&algo
 													) );
-			std::cout << "Fastest algorithm is Algo " << algo << "\n";
+			println("Fastest algorithm is Algo " << algo);
 			convAlgorithm = algo;
 			// New way of finding the fastest config
 			// Setup for findFastest call
-			std::cout << "Testing cudnnFindConvolutionForwardAlgorithm ...\n";
+			println("Testing cudnnFindConvolutionForwardAlgorithm ...");
 			int requestedAlgoCount = 5; 
 			int returnedAlgoCount[1];
 			cudnnConvolutionFwdAlgoPerf_t *results = (cudnnConvolutionFwdAlgoPerf_t*)malloc(sizeof(cudnnConvolutionFwdAlgoPerf_t)*requestedAlgoCount);
@@ -649,7 +632,7 @@ class network_t
 			algo = (cudnnConvolutionFwdAlgo_t)convAlgorithm;
 			if (algo == CUDNN_CONVOLUTION_FWD_ALGO_FFT)
 			{
-				//std::cout << "Using FFT for convolution\n";
+				//println("Using FFT for convolution");
 			}
 		}
 
@@ -817,15 +800,15 @@ class network_t
 											dstTensorDesc,
 											*dstData) );    
 	}
-	void fullyConnectedBackward(const Layer_t<double>& current_layer, const MATRIX_DATA_TYPE* last_input){
+	void fullyConnectedBackward(const Layer_t<double>& current_layer, const value_type* last_input){
 		int dim_x = current_layer.inputs;
 		int dim_y = current_layer.outputs;
 		int dim_z = 1;
-		MATRIX_DATA_TYPE* dstData = NULL;
+		value_type* dstData = NULL;
 		resize(dim_x*dim_y, &dstData);
 
-		MATRIX_DATA_TYPE alpha = MATRIX_DATA_TYPE(1), beta = MATRIX_DATA_TYPE(0);
-		// checkCudaErrors( cudaMemcpy(*dstData, ip.bias_d, ip.outputs*sizeof(MATRIX_DATA_TYPE), cudaMemcpyDeviceToDevice) );
+		value_type alpha = value_type(1), beta = value_type(0);
+		// checkCudaErrors( cudaMemcpy(*dstData, ip.bias_d, ip.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
 		//if (DEBUG) printDeviceVector("last_input: \n", current_layer.inputs, last_input);
 		//if (DEBUG) printDeviceVector("del_W: \n", current_layer.outputs, current_layer.del_d);
 		
@@ -840,10 +823,10 @@ class network_t
 		
 		if (DEBUG) printDeviceVector("\tdelta_W (del_W*hidden_input): \n", current_layer.inputs*current_layer.outputs, dstData);
 
-		alpha = MATRIX_DATA_TYPE(0.1); // learning rate
-		beta = MATRIX_DATA_TYPE(1); 
+		alpha = value_type(0.1); // learning rate
+		beta = value_type(1); 
 		//checkCudaErrors( cublasDscal(cublasHandle, ip.inputs*ip.outputs, &alpha, ip.data_d, 1); 
-		const MATRIX_DATA_TYPE* B = current_layer.data_d;
+		const value_type* B = current_layer.data_d;
 		// C = α op ( A ) + β * C
 		// C = 0.1 * delta_W2 + C
 		if (DEBUG) printDeviceVector("\tW = W + 0.1*delta_W: old\n", dim_x*dim_y, current_layer.data_d);
@@ -860,7 +843,7 @@ class network_t
 
 		// place bias into dstData
 		dim_x = 1;
-		const MATRIX_DATA_TYPE* B2 = current_layer.bias_d;
+		const value_type* B2 = current_layer.bias_d;
 		if (DEBUG) printDeviceVector("\tdel_W:\n", current_layer.outputs, current_layer.del_d);
 		if (DEBUG) printDeviceVector("\tB = B + 0.1*del_W: old\n", current_layer.outputs, current_layer.bias_d);
 		checkCudaErrors( cublasDgeam(cublasHandle,
@@ -875,7 +858,7 @@ class network_t
 
 		checkCudaErrors( cudaFree(dstData));
 	}
-	void activationBackward(int n, int c, int h, int w, MATRIX_DATA_TYPE* srcData, MATRIX_DATA_TYPE* dstData, MATRIX_DATA_TYPE *srcDiffData, MATRIX_DATA_TYPE **dstDiffData)
+	void activationBackward(int n, int c, int h, int w, value_type* srcData, value_type* dstData, value_type *srcDiffData, value_type **dstDiffData)
 	{
 		checkCUDNN( cudnnSetActivationDescriptor(activDesc,
 												CUDNN_ACTIVATION_SIGMOID,
@@ -906,8 +889,8 @@ class network_t
 												n, c,
 												h,
 												w) );
-		MATRIX_DATA_TYPE alpha = MATRIX_DATA_TYPE(1);
-		MATRIX_DATA_TYPE beta  = MATRIX_DATA_TYPE(0);
+		value_type alpha = value_type(1);
+		value_type beta  = value_type(0);
 		checkCUDNN( cudnnActivationBackward(cudnnHandle,
 											activDesc, // RELU
 											&alpha,
@@ -934,7 +917,7 @@ class network_t
 
 		readImage(fname, imgData_h);
 
-		std::cout << "Performing forward propagation ...\n";
+		println("Performing forward propagation ...");
 
 		checkCudaErrors( cudaMalloc(&srcData, IMAGE_H*IMAGE_W*sizeof(value_type)) );
 		checkCudaErrors( cudaMemcpy(srcData, imgData_h,
@@ -966,7 +949,7 @@ class network_t
 			if (toReal(result[id]) < toReal(result[i])) id = i;
 		}
 
-		std::cout << "Resulting weights from Softmax:" << std::endl;
+		println("Resulting weights from Softmax:");
 		printDeviceVector(n*c*h*w, dstData);
 
 		checkCudaErrors( cudaFree(srcData) );
@@ -974,59 +957,59 @@ class network_t
 		return id;
 	}
 
-	int predictExample(const MATRIX_DATA_TYPE** image_data, MATRIX_DATA_TYPE target, const Layer_t<double>& input, const Layer_t<double>& hidden){
+	int predictExample(const value_type** image_data, value_type target, const Layer_t<double>& input, const Layer_t<double>& hidden){
 		
-		MATRIX_DATA_TYPE *image_data_d = NULL;
-		MATRIX_DATA_TYPE imgData_h[IMAGE_H*IMAGE_W];
+		value_type *image_data_d = NULL;
+		value_type imgData_h[IMAGE_H*IMAGE_W];
 
 		// Plot to console and normalize image to be in range [0,1]
 		for (int i = 0; i < N; i++)
 		{
-			imgData_h[i] = (*image_data)[i] / MATRIX_DATA_TYPE(255);
+			imgData_h[i] = (*image_data)[i] / value_type(255);
 			#if 0
-			std::cout<<(imgData_h[i]>0?"#":" ")<<" ";
+			print((imgData_h[i]>0?"#":" ")<<" ");
 			if (i%IMAGE_W==IMAGE_W-1)
-				std::cout<<std::endl;
+				println(" ");
 			#endif
 		}
 		resize(IMAGE_H*IMAGE_W, &image_data_d);
-		checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, IMAGE_H*IMAGE_W*sizeof(MATRIX_DATA_TYPE), cudaMemcpyHostToDevice) );
+		checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, IMAGE_H*IMAGE_W*sizeof(value_type), cudaMemcpyHostToDevice) );
 		int id = predictExampleDevice(image_data_d, target, input, hidden);
 		checkCudaErrors( cudaFree(image_data_d) );
 		return id;
 	}
 
 
-	int predictExampleDevice(const MATRIX_DATA_TYPE* image_data_d, MATRIX_DATA_TYPE target, const Layer_t<double>& input, const Layer_t<double>& hidden){
+	int predictExampleDevice(const value_type* image_data_d, value_type target, const Layer_t<double>& input, const Layer_t<double>& hidden){
 		int n,c,h,w;
-		MATRIX_DATA_TYPE *srcData = NULL, *dstData = NULL;
-		if (DEBUG) std::cout<<std::endl<<"Target: "<<target<<std::endl;
+		value_type *srcData = NULL, *dstData = NULL;
+		if (DEBUG) println("\nTarget: "<<target);
 
 		// Setup Variables for forward propagation
-		//checkCudaErrors( cudaMalloc(&srcData, IMAGE_H*IMAGE_W*sizeof(MATRIX_DATA_TYPE)) ); 
+		//checkCudaErrors( cudaMalloc(&srcData, IMAGE_H*IMAGE_W*sizeof(value_type)) ); 
 		resize(IMAGE_H*IMAGE_W, &srcData);
-		checkCudaErrors( cudaMemcpy(srcData, image_data_d,  IMAGE_H*IMAGE_W*sizeof(MATRIX_DATA_TYPE), cudaMemcpyDeviceToDevice) );
+		checkCudaErrors( cudaMemcpy(srcData, image_data_d,  IMAGE_H*IMAGE_W*sizeof(value_type), cudaMemcpyDeviceToDevice) );
 		n = c = 1; h = IMAGE_H; w = IMAGE_W;
 		// Perform Forward propagation
-		if (DEBUG) std::cout << "Performing forward propagation ...\n";
+		if (DEBUG) println("Performing forward propagation ...");
  
 		if (DEBUG) printDeviceVector("input: \n", input.inputs, srcData);
 		fullyConnectedForward(input, n, c, h, w, srcData, &dstData);
 		if (DEBUG) printDeviceVector("fullyConnectedforward: \n", input.outputs, dstData);
 		activationForward(n, c, h, w, dstData, &srcData);
-		checkCudaErrors( cudaMemcpy(input.output_d, srcData, input.outputs*sizeof(MATRIX_DATA_TYPE), cudaMemcpyDeviceToDevice) );
+		checkCudaErrors( cudaMemcpy(input.output_d, srcData, input.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
 		if (DEBUG) printDeviceVector("Hidden layer outputs: \n", n*c*h*w, input.output_d);
 
 		fullyConnectedForward(hidden, n, c, h, w, srcData, &dstData);
 		if (DEBUG) printDeviceVector("fullyConnectedforward: \n", hidden.outputs, dstData);
 		activationForward(n, c, h, w, dstData, &srcData);
-		checkCudaErrors( cudaMemcpy(hidden.output_d, srcData, hidden.outputs*sizeof(MATRIX_DATA_TYPE), cudaMemcpyDeviceToDevice) );
+		checkCudaErrors( cudaMemcpy(hidden.output_d, srcData, hidden.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
 		if (DEBUG) printDeviceVector("Output layer outputs: \n", n*c*h*w, hidden.output_d);
 		
 		// Setup Variables for backward propagation
 		const int max_digits = hidden.outputs; //n*c*h*w; //10;
-		MATRIX_DATA_TYPE result[max_digits];
-		checkCudaErrors( cudaMemcpy(result, srcData, max_digits*sizeof(MATRIX_DATA_TYPE), cudaMemcpyDeviceToHost) );
+		value_type result[max_digits];
+		checkCudaErrors( cudaMemcpy(result, srcData, max_digits*sizeof(value_type), cudaMemcpyDeviceToHost) );
 		int id = 0;
 		for (int i = 1; i < max_digits; i++){
 			if (result[id] < result[i]) 
@@ -1038,40 +1021,40 @@ class network_t
 		return id;
 	}
 
-	int learnExample(const MATRIX_DATA_TYPE** image_data, MATRIX_DATA_TYPE target, const Layer_t<double>& input,
+	int learnExample(const value_type** image_data, value_type target, const Layer_t<double>& input,
 						  const Layer_t<double>& hidden)
 	{
 	   
-		MATRIX_DATA_TYPE *image_data_d = NULL;
-		MATRIX_DATA_TYPE imgData_h[IMAGE_H*IMAGE_W];
+		value_type *image_data_d = NULL;
+		value_type imgData_h[IMAGE_H*IMAGE_W];
 
 		// Plot to console and normalize image to be in range [0,1]
 		for (int i = 0; i < N; i++)
 		{
-			imgData_h[i] = (*image_data)[i] / MATRIX_DATA_TYPE(255);
+			imgData_h[i] = (*image_data)[i] / value_type(255);
 			#if 0
-			std::cout<<(imgData_h[i]>0?"#":" ")<<" ";
+			print((imgData_h[i]>0?"#":" ")<<" ");
 			if (i%IMAGE_W==IMAGE_W-1)
-				std::cout<<std::endl;
+				println(" ")
 			#endif
 		}
 		resize(IMAGE_H*IMAGE_W, &image_data_d);
-		checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, IMAGE_H*IMAGE_W*sizeof(MATRIX_DATA_TYPE), cudaMemcpyHostToDevice) );
+		checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, IMAGE_H*IMAGE_W*sizeof(value_type), cudaMemcpyHostToDevice) );
 		int id = predictExampleDevice(image_data_d, target, input, hidden);
-		if (DEBUG) std::cout << "Prediction: "<<id << std::endl;
+		if (DEBUG) println("Prediction: "<<id);
 		
 		
-		MATRIX_DATA_TYPE *srcDiffData = NULL, *dstDiffData = NULL, *targetData = NULL;
+		value_type *srcDiffData = NULL, *dstDiffData = NULL, *targetData = NULL;
 		int n, c, h, w;
 
 		// Perform backward propagation
-		if (DEBUG) std::cout<<"\nPerforming backward propagation ...\n";
+		if (DEBUG) println("\nPerforming backward propagation ...");
 		c = hidden.outputs; n = h = w = 1;
 
 		getBackPropData(hidden, hidden, target, dstDiffData, &targetData, &srcDiffData, true);
 		//THEORY: delW2 = (target-output)*output*(1-output)
 		activationBackward(n, c, h, w, hidden.output_d, targetData, srcDiffData, &dstDiffData);
-		checkCudaErrors( cudaMemcpy(hidden.del_d, dstDiffData, hidden.outputs*sizeof(MATRIX_DATA_TYPE), cudaMemcpyDeviceToDevice) );
+		checkCudaErrors( cudaMemcpy(hidden.del_d, dstDiffData, hidden.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
 		if (DEBUG) printDeviceVector("delW2: \n", hidden.outputs, hidden.del_d);
 
 		c = input.outputs;
@@ -1079,7 +1062,7 @@ class network_t
 		//THEORY: del_W1 = (del_W2*W2')*hidden_output*(1-hidden_output)
 		if (DEBUG) printDeviceVector("\thidden_output: \n", input.outputs, input.output_d);
 		activationBackward(n, c, h, w, input.output_d, targetData, srcDiffData, &dstDiffData); 
-		checkCudaErrors( cudaMemcpy(input.del_d, dstDiffData, input.outputs*sizeof(MATRIX_DATA_TYPE), cudaMemcpyDeviceToDevice) );
+		checkCudaErrors( cudaMemcpy(input.del_d, dstDiffData, input.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
 		if (DEBUG) printDeviceVector("delW1: \n", input.outputs, input.del_d);
 
 
@@ -1094,33 +1077,33 @@ class network_t
 		return id;
 	}
 	
-	void getBackPropData(const Layer_t<double>& layer, const Layer_t<double>& next_layer, MATRIX_DATA_TYPE target, MATRIX_DATA_TYPE* dstDiffData, 
-			MATRIX_DATA_TYPE** targetData, MATRIX_DATA_TYPE** srcDiffData, 
+	void getBackPropData(const Layer_t<double>& layer, const Layer_t<double>& next_layer, value_type target, value_type* dstDiffData, 
+			value_type** targetData, value_type** srcDiffData, 
 			bool last_layer)
 	{
 		const int max_digits = layer.outputs;
-		MATRIX_DATA_TYPE srcData[max_digits];
-		checkCudaErrors( cudaMemcpy(srcData, layer.output_d, max_digits*sizeof(MATRIX_DATA_TYPE), cudaMemcpyDeviceToHost) );
+		value_type srcData[max_digits];
+		checkCudaErrors( cudaMemcpy(srcData, layer.output_d, max_digits*sizeof(value_type), cudaMemcpyDeviceToHost) );
 		resize(max_digits, srcDiffData);
 		resize(max_digits, targetData);
 		if (last_layer){
 			// resize(max_digits, &dstDiffData);
-			MATRIX_DATA_TYPE srcDiffData_h[max_digits];
-			MATRIX_DATA_TYPE targetData_h[max_digits];
+			value_type srcDiffData_h[max_digits];
+			value_type targetData_h[max_digits];
 
 			for (int i = 0; i<max_digits; i++){
 				targetData_h[i] = i==target?1:0;
 				srcDiffData_h[i] = targetData_h[i]-srcData[i];
 			}
 
-			//checkCudaErrors( cudaMalloc(&srcDiffData, max_digits*sizeof(MATRIX_DATA_TYPE)) );
-			checkCudaErrors( cudaMemcpy(*srcDiffData, srcDiffData_h, max_digits*sizeof(MATRIX_DATA_TYPE),cudaMemcpyHostToDevice) );
-			//checkCudaErrors( cudaMalloc(&targetData, max_digits*sizeof(MATRIX_DATA_TYPE)) );
-			checkCudaErrors( cudaMemcpy(*targetData, targetData_h, max_digits*sizeof(MATRIX_DATA_TYPE),cudaMemcpyHostToDevice) );
+			//checkCudaErrors( cudaMalloc(&srcDiffData, max_digits*sizeof(value_type)) );
+			checkCudaErrors( cudaMemcpy(*srcDiffData, srcDiffData_h, max_digits*sizeof(value_type),cudaMemcpyHostToDevice) );
+			//checkCudaErrors( cudaMalloc(&targetData, max_digits*sizeof(value_type)) );
+			checkCudaErrors( cudaMemcpy(*targetData, targetData_h, max_digits*sizeof(value_type),cudaMemcpyHostToDevice) );
 		
 		}else{
 			//THEORY: del_W1 = (del_W2*W2')*hidden_output*(1-hidden_output)
-			MATRIX_DATA_TYPE alpha = MATRIX_DATA_TYPE(1), beta = MATRIX_DATA_TYPE(0);
+			value_type alpha = value_type(1), beta = value_type(0);
 			if (DEBUG) printDeviceVector("\tW2: \n", next_layer.inputs*next_layer.outputs, next_layer.data_d);
 			checkCudaErrors( cublasDgemv(cublasHandle, CUBLAS_OP_N,
 									  next_layer.inputs, next_layer.outputs,
@@ -1135,8 +1118,8 @@ class network_t
 		if (DEBUG) printDeviceVector("\tsrcDiffData: \n", max_digits, *srcDiffData);
 	}
 
-	static void loadData(MATRIX_DATA_TYPE **training_data, MATRIX_DATA_TYPE **testing_data,
-		 MATRIX_DATA_TYPE **training_target, MATRIX_DATA_TYPE **testing_target,
+	static void loadData(value_type **training_data, value_type **testing_data,
+		 value_type **training_target, value_type **testing_target,
 		 int &total_train_size, int &total_test_size){
 		std::string name;
 		total_train_size = 0;
@@ -1150,7 +1133,6 @@ class network_t
 				std::stringstream sstm;
 				sstm<<"data/"<<name<<d<<".bin";
 				fname = sstm.str();
-				//std::cout<<"Calculating file "<<fname<<"\t";
 				std::ifstream dataFile (fname.c_str(), std::ios::in | std::ios::binary);
 				if (!dataFile)
 				{
@@ -1162,7 +1144,7 @@ class network_t
 				size_t file_size = static_cast<std::string::size_type>(dataFile.tellg());
 				dataFile.seekg(0, std::ios::beg);		
 				dataFile.close();
-				//std::cout<<file_size<<std::endl;
+				// println("Calculating file "<<fname<<"\t"<<file_size);
 				if (t==0)
 					total_train_size += file_size;
 				else
@@ -1170,10 +1152,10 @@ class network_t
 			 }
 		}
 
-		*training_data = new MATRIX_DATA_TYPE[total_train_size];
-		*testing_data = new MATRIX_DATA_TYPE[total_test_size];
-		*training_target = new MATRIX_DATA_TYPE[total_train_size/N];
-		*testing_target = new MATRIX_DATA_TYPE[total_test_size/N];
+		*training_data = new value_type[total_train_size];
+		*testing_data = new value_type[total_test_size];
+		*training_target = new value_type[total_train_size/N];
+		*testing_target = new value_type[total_test_size/N];
 		total_train_size = 0;
 		total_test_size = 0;
 		for (int t=0; t<2; t++){
@@ -1182,7 +1164,6 @@ class network_t
 				std::stringstream sstm;
 				sstm<<"data/"<<name<<d<<".bin";
 				fname = sstm.str();
-				//std::cout<<"Reading file "<<fname;
 				std::ifstream dataFile (fname.c_str(), std::ios::in | std::ios::binary);
 				if (!dataFile)
 				{
@@ -1202,11 +1183,11 @@ class network_t
 				}
 				dataFile.close();
 
-				MATRIX_DATA_TYPE v;
+				value_type v;
 				int m = file_size/N;
-				//std::cout<<" "<<file_size<<" "<<m<<"\n";
+				// println("Reading file "<<fname<<" "<<file_size<<" "<<m);
 				for (int i=0; i<file_size; i++){
-					v = static_cast<MATRIX_DATA_TYPE>((uint8_t)data[(i/N)+m*(i%N) ]);
+					v = static_cast<value_type>((uint8_t)data[(i/N)+m*(i%N) ]);
 					if (t==0){
 						(*training_data)[total_train_size+i] = v;
 						if (i<m)
@@ -1246,263 +1227,178 @@ void displayUsage()
 	printf( "mnistCUDNN {<options>}\n");
 	printf( "help                   : display this help\n");
 	printf( "device=<int>           : set the device to run the sample\n");
-	printf( "image=<name>           : classify specific image\n");
+	// printf( "image=<name>           : classify specific image\n");
 }
 
-bool loadWeights(const char* filename, size_t size, MATRIX_DATA_TYPE* matrix){
+template <typename value_type>
+bool loadWeights(const char* filename, size_t size, value_type* matrix){
 	std::ifstream myfile(filename, std::ios::in | std::ios::binary);
 	if (myfile.is_open()){
-		myfile.read((char*)matrix, size*sizeof(MATRIX_DATA_TYPE));
+		myfile.read((char*)matrix, size*sizeof(value_type));
 	}else{
-		std::cout<<"Error reading file "<<filename<<std::endl;
+		println("Error reading file "<<filename);
 		return false;
 	}
 }
 
-bool saveWeights(const char* filename, size_t size, MATRIX_DATA_TYPE* matrix){
+template <typename value_type>
+bool saveWeights(const char* filename, size_t size, value_type* matrix){
 	std::ofstream myfile(filename, std::ios::out | std::ios::binary);
 	if (myfile.is_open()){
-		myfile.write((char*)matrix, size*sizeof(MATRIX_DATA_TYPE));
+		myfile.write((char*)matrix, size*sizeof(value_type));
 	}else{
-		std::cout<<"Error saving file "<<filename<<std::endl;
+		println("Error saving file "<<filename);
 		return false;
 	}
 }
 
 int main(int argc, char *argv[])
 {   
-	std::string image_path;
-	int i1,i2,i3;
+	// Define the precision you want to use: half (fp16), full (float), double (double)
+	typedef double value_type;
 
+	// Print Usage if help is in the arguments
 	if (checkCmdLineFlag(argc, (const char **)argv, "help"))
 	{
 		displayUsage();
 		exit(EXIT_WAIVED); 
 	}
 
+	// Print Library and Device stats
 	int version = (int)cudnnGetVersion();
+	println("\n\n\n");
 	printf("cudnnGetVersion() : %d , CUDNN_VERSION from cudnn.h : %d (%s)\n", version, CUDNN_VERSION, CUDNN_VERSION_STR);
 	printf("Host compiler version : %s %s\r", COMPILER_NAME, COMPILER_VER);
 	showDevices();
 
+	// If device argument is provided then set device (device=1)
 	int device = 0;
 	if (checkCmdLineFlag(argc, (const char **)argv, "device"))
 	{
 		device = getCmdLineArgumentInt(argc, (const char **)argv, "device");
 		checkCudaErrors( cudaSetDevice(device) );
 	}
-	std::cout << "Using device " << device << std::endl;
-	
-	if (checkCmdLineFlag(argc, (const char **)argv, "image"))
-	{
-		char* image_name;
-		getCmdLineArgumentString(argc, (const char **)argv,
-								 "image", (char **) &image_name);        
+	println("Using device " << device);
 
-		network_t<float> mnist;
-		Layer_t<float> conv1(1,20,5,conv1_bin,conv1_bias_bin,argv[0]);
-		Layer_t<float> conv2(20,50,5,conv2_bin,conv2_bias_bin,argv[0]);
-		Layer_t<float>   ip1(800,500,1,ip1_bin,ip1_bias_bin,argv[0]);
-		Layer_t<float>   ip2(500,10,1,ip2_bin,ip2_bias_bin,argv[0]);
-		int i1 = mnist.classify_example(image_name, conv1, conv2, ip1, ip2);
-		std::cout << "\nResult of classification: " << i1 << std::endl;
-
-		cudaDeviceReset();
-		exit(EXIT_SUCCESS);
-	}
 
 	srand(time(NULL));
 	
-	// default behaviour
-	if (argc == 1 || (argc == 2) && checkCmdLineFlag(argc, (const char **)argv, "device"))
-	{
-		// check available memory
-		struct cudaDeviceProp prop;
-		checkCudaErrors(cudaGetDeviceProperties( &prop, device ));
-		double globalMem = prop.totalGlobalMem/double(1024*1024);
-		bool low_memory = false;
-		if (globalMem < 1536) 
-		{
-		// takes care of 1x1 convolution workaround for fully connected layers
-		// when CUDNN_CONVOLUTION_FWD_ALGO_FFT is used
-#if !defined(CUDA_VERSION) || (CUDA_VERSION <= 7000)
-			low_memory = true;
-#endif
+	const char *conv1_bin = "conv1.bin";
+	const char *conv1_bias_bin = "conv1.bias.bin";
+	const char *conv2_bin = "conv2.bin";
+	const char *conv2_bias_bin = "conv2.bias.bin";
+	const char *ip1_bin = "ip1.bin";
+	const char *ip1_bias_bin = "ip1.bias.bin";
+	const char *ip2_bin = "ip2.bin";
+	const char *ip2_bias_bin = "ip2.bias.bin";
+
+	network_t<value_type> mnist;
+	Layer_t<value_type> conv1(1,20,5,conv1_bin,conv1_bias_bin,argv[0]);
+	Layer_t<value_type> conv2(20,50,5,conv2_bin,conv2_bias_bin,argv[0]);
+	Layer_t<value_type>   ip1(800,500,1,ip1_bin,ip1_bias_bin,argv[0]);
+	Layer_t<value_type>   ip2(500,10,1,ip2_bin,ip2_bias_bin,argv[0]);
+
+	// Define and initialize network
+	Layer_t<value_type> input(N,100);
+	Layer_t<value_type> hidden(100,10);
+
+	value_type *train_data, *testing_data;
+	value_type *train_target, *testing_target;
+
+	// Read training data
+	value_type *training_data;
+	value_type *training_target;
+	int total_train_data, total_test_data;
+	mnist.loadData(&training_data, &testing_data, &training_target, &testing_target, total_train_data, total_test_data);
+	println("\n\nData Loaded. Training examples:"<<total_train_data/N<<" Testing examples:"<<total_test_data/N);
+
+	// Shuffle training data
+	int m = total_train_data/N;
+	int *perm = new int[m];
+	for (int i=0; i<m; i++) perm[i] = i;
+	std::random_shuffle(&perm[0],&perm[m]);
+
+	// apply the permutation
+	train_data = new value_type[m*N];
+	train_target = new value_type[m];
+	for (int i=0; i<m; i++){
+		for (int j=0; j<N; j++){
+			train_data[i*N+j] = training_data[perm[i]*N+j];
 		}
-		{
-			std::cout << "\nTesting double precision\n";
-			network_t<double> mnist;
-			Layer_t<double> conv1(1,20,5,conv1_bin,conv1_bias_bin,argv[0]);
-			Layer_t<double> conv2(20,50,5,conv2_bin,conv2_bias_bin,argv[0]);
-			Layer_t<double>   ip1(800,500,1,ip1_bin,ip1_bias_bin,argv[0]);
-			Layer_t<double>   ip2(500,10,1,ip2_bin,ip2_bias_bin,argv[0]);
-
-			// Define and initialize network
-			Layer_t<double> input(N,100);
-			Layer_t<double> hidden(100,10);
-
-			MATRIX_DATA_TYPE *train_data, *testing_data;
-			MATRIX_DATA_TYPE *train_target, *testing_target;
-			
-			// Read training data
-			MATRIX_DATA_TYPE *training_data;
-			MATRIX_DATA_TYPE *training_target;
-			int total_train_data, total_test_data;
-			mnist.loadData(&training_data, &testing_data, &training_target, &testing_target, total_train_data, total_test_data);
-			std::cout<<"\n\nData Loaded. Training examples:"<<total_train_data/N<<" Testing examples:"<<total_test_data/N<<std::endl;
-			
-			// Shuffle training data
-			int m = total_train_data/N;
-			int *perm = new int[m];
-			for (int i=0; i<m; i++) perm[i] = i;
-			std::random_shuffle(&perm[0],&perm[m]);
-
-			// apply the permutation
-			train_data = new MATRIX_DATA_TYPE[m*N];
-			train_target = new MATRIX_DATA_TYPE[m];
-			for (int i=0; i<m; i++){
-				for (int j=0; j<N; j++){
-					train_data[i*N+j] = training_data[perm[i]*N+j];
-				}
-				train_target[i] = training_target[perm[i]];
-			}
-
-			std::cout<<"Training Examples shuffled."<<std::endl;
-
-			// Free some variables
-			delete [] training_data;
-			delete [] training_target;
-
-			if (
-				loadWeights("input_data.bin", input.inputs*input.outputs, input.data_h) &&
-				loadWeights("input_bias.bin", input.outputs, input.bias_h) &&
-				loadWeights("hidden_data.bin", hidden.inputs*hidden.outputs, hidden.data_h) &&
-				loadWeights("hidden_bias.bin", hidden.outputs, hidden.bias_h)
-			){
-			
-				input.copyDataToDevice();
-				hidden.copyDataToDevice();
-				std::cout<<"Weights from file loaded"<<std::endl;
-			}else{
-				std::cout<<"\n **** Learning started ****"<<std::endl;
-				std::clock_t    start;
-				start = std::clock(); 
-
-				// Learn all examples till convergence
-				int num_iterations = 5;
-				while(num_iterations--){ // Use a better convergence criteria
-					for (int i=0; i<m; i++){
-						if (DEBUG) std::cout<<"\n\n\n\n\n";
-						const MATRIX_DATA_TYPE *training_example = train_data+i*N;
-						MATRIX_DATA_TYPE target = train_target[i];
-						MATRIX_DATA_TYPE predicted = mnist.learnExample(&training_example, target, input, hidden);
-						if (DEBUG) getchar();
-						else if (i%1000==0) std::cout<<"."<<std::flush;
-						//std::cout<<"Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted<<"\n";
-					}
-				}
-				std::cout<<"\n **** Learning completed ****\n";
-				std::cout << "Learning Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second" << std::endl;
-				
-				input.copyDataToHost();
-				hidden.copyDataToHost();
-				// Save the weights in a binary file
-				saveWeights("input_data.bin", input.inputs*input.outputs, input.data_h);
-				saveWeights("input_bias.bin", input.outputs, input.bias_h);
-				saveWeights("hidden_data.bin", hidden.inputs*hidden.outputs, hidden.data_h);
-				saveWeights("hidden_bias.bin", hidden.outputs, hidden.bias_h);
-			}
-
-			std::cout<<"\n **** Testing started ****"<<std::endl;
-
-			std::clock_t    start;
-			start = std::clock(); 
-
-			// Read testing data
-			int correct = 0;
-			int n = total_test_data/N;
-			for (int i=0; i<n; i++){
-				const MATRIX_DATA_TYPE *test_example = testing_data+i*N;
-				MATRIX_DATA_TYPE target = testing_target[i];
-				MATRIX_DATA_TYPE predicted = mnist.predictExample(&test_example, target, input, hidden);
-				if (target == predicted){
-					correct++;
-				}
-				if (!DEBUG && i%1000==0) std::cout<<"."<<std::flush;
-				//std::cout<<"Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted<<"\n";
-			}
-			std::cout<<"\n **** Testing completed ****\n";
-			std::cout << "Testing Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second" << std::endl;
-			std::cout<<"Correctly predicted "<<correct<<" examples out of "<<n<<std::endl;
-
-
-			// get_path(image_path, first_image, argv[0]);
-			// i1 = mnist.classify_example(image_path.c_str(), conv1, conv2, ip1, ip2);
-			
-			// get_path(image_path, second_image, argv[0]);
-			// i2 = mnist.classify_example(image_path.c_str(), conv1, conv2, ip1, ip2);
-			
-			// get_path(image_path, third_image, argv[0]);
-			// // New feature in cuDNN v3: FFT for convolution
-			// mnist.setConvolutionAlgorithm(CUDNN_CONVOLUTION_FWD_ALGO_FFT);
-			// i3 = mnist.classify_example(image_path.c_str(), conv1, conv2, ip1, ip2);
-
-			// std::cout << "\nResult of classification: " << i1 << " " << i2 << " " << i3 << std::endl;
-			// if (i1 != 1 || i2 != 3 || i3 != 5)
-			// {
-			// 	std::cout << "\nTest failed!\n";
-			// 	FatalError("Prediction mismatch");
-			// }
-			// else
-			// {
-			// 	std::cout << "\nTest passed!\n";
-			// }
-		}
-
-		if (false) {
-			std::cout << "\nTesting half precision (math in single precision)\n";
-			network_t<half1> mnist;
-			// Conversion of input weights to half precision is done
-			// on host using tools from fp16_emu.cpp
-			Layer_t<half1> conv1(1,20,5,conv1_bin,conv1_bias_bin,argv[0],FP16_HOST);
-			Layer_t<half1> conv2(20,50,5,conv2_bin,conv2_bias_bin,argv[0],FP16_HOST);
-			// Conversion of input weights to half precision is done
-			// on device using cudnnTransformTensor
-			Layer_t<half1>   ip1(800,500,1,ip1_bin,ip1_bias_bin,argv[0], FP16_CUDNN);
-			// Conversion of input weights to half precision is done
-			// on device using CUDA kernel from fp16_dev.cu
-			Layer_t<half1>   ip2(500,10,1,ip2_bin,ip2_bias_bin,argv[0], FP16_CUDA);
-			get_path(image_path, first_image, argv[0]);
-			i1 = mnist.classify_example(image_path.c_str(), conv1, conv2, ip1, ip2);
-			
-			get_path(image_path, second_image, argv[0]);
-			i2 = mnist.classify_example(image_path.c_str(), conv1, conv2, ip1, ip2);
-			
-			get_path(image_path, third_image, argv[0]);
-			// New feature in cuDNN v3: FFT for convolution
-			if (!low_memory)
-			{
-				mnist.setConvolutionAlgorithm(CUDNN_CONVOLUTION_FWD_ALGO_FFT);
-			}
-			i3 = mnist.classify_example(image_path.c_str(), conv1, conv2, ip1, ip2);
-
-			std::cout << "\nResult of classification: " << i1 << " " << i2 << " " << i3 << std::endl;
-			if (i1 != 1 || i2 != 3 || i3 != 5)
-			{
-				std::cout << "\nTest failed!\n";
-				FatalError("Prediction mismatch");
-			}
-			else
-			{
-				std::cout << "\nTest passed!\n";
-			}
-		}
-
-		cudaDeviceReset();
-		exit(EXIT_SUCCESS);        
+		train_target[i] = training_target[perm[i]];
 	}
 
-	displayUsage();
+	println("Training Examples shuffled.");
+
+	// Free some variables
+	delete [] training_data;
+	delete [] training_target;
+
+	// Try to load learned weights from file other wise start learning phase
+	if (
+		loadWeights("input_data.bin", input.inputs*input.outputs, input.data_h) &&
+		loadWeights("input_bias.bin", input.outputs, input.bias_h) &&
+		loadWeights("hidden_data.bin", hidden.inputs*hidden.outputs, hidden.data_h) &&
+		loadWeights("hidden_bias.bin", hidden.outputs, hidden.bias_h)
+	){
+
+		input.copyDataToDevice();
+		hidden.copyDataToDevice();
+		println("Weights from file loaded");
+	}else{
+		println("\n **** Learning started ****");
+		std::clock_t    start;
+		start = std::clock(); 
+
+		// Learn all examples till convergence
+		int num_iterations = 5;
+		while(num_iterations--){ // Use a better convergence criteria
+			for (int i=0; i<m; i++){
+				if (DEBUG) print("\n\n\n\n\n");
+				const value_type *training_example = train_data+i*N;
+				value_type target = train_target[i];
+				value_type predicted = mnist.learnExample(&training_example, target, input, hidden);
+				if (DEBUG) getchar();
+				else if (i%1000==0) print("."<<std::flush);
+				//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+			}
+		}
+		println("\n **** Learning completed ****");
+		println("Learning Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
+		
+		input.copyDataToHost();
+		hidden.copyDataToHost();
+		// Save the weights in a binary file
+		saveWeights("input_data.bin", input.inputs*input.outputs, input.data_h);
+		saveWeights("input_bias.bin", input.outputs, input.bias_h);
+		saveWeights("hidden_data.bin", hidden.inputs*hidden.outputs, hidden.data_h);
+		saveWeights("hidden_bias.bin", hidden.outputs, hidden.bias_h);
+	}
+
+	// Testing Phase
+	{
+		println("\n **** Testing started ****");
+		std::clock_t    start;
+		start = std::clock(); 
+		int correct = 0;
+		int n = total_test_data/N;
+		for (int i=0; i<n; i++){
+			const value_type *test_example = testing_data+i*N;
+			value_type target = testing_target[i];
+			value_type predicted = mnist.predictExample(&test_example, target, input, hidden);
+			if (target == predicted){
+				correct++;
+			}
+			if (!DEBUG && i%1000==0) print("."<<std::flush);
+			//println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+		}
+		println("\n **** Testing completed ****\n");
+		println("Testing Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
+		println("Correctly predicted "<<correct<<" examples out of "<<n);
+	}
+
+	// Reset device and exit gracefully
 	cudaDeviceReset();
-	exit(EXIT_WAIVED);
+	exit(EXIT_SUCCESS);        
+	
 }
