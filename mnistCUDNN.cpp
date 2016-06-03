@@ -861,7 +861,7 @@ class network_t
 		{
 			FatalError("Not Implemented"); 
 		}
-		println("fullyConnectedforward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("fullyConnectedforward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		int dim_x = c*h*w;
 		int dim_y = fc.outputs;
 		// resize(dim_y, &fc.output_d);
@@ -919,7 +919,7 @@ class network_t
 		n = tensorOuputDimA[0]; c = tensorOuputDimA[1];
 		h = tensorOuputDimA[2]; w = tensorOuputDimA[3];
 
-		println("convoluteForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("convoluteForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);
 
 		if (convAlgorithm < 0)
@@ -1047,7 +1047,7 @@ class network_t
 		n = tensorOuputDimA[0]; c = tensorOuputDimA[1];
 		h = tensorOuputDimA[2]; w = tensorOuputDimA[3];
 
-		println("convoluteForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("convoluteForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);
 
 		// resize(n*c*h*w, &(conv.output_d));
@@ -1090,7 +1090,7 @@ class network_t
 							int& n, int& c, int& h, int& w,
 							value_type* diffData)
 	{
-		println("convoluteBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("convoluteBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 
 		size_t sizeInBytes = 0;
 		void* workSpace=NULL;
@@ -1149,7 +1149,7 @@ class network_t
 													tensorOuputDimA) );
 		n = tensorOuputDimA[0]; c = tensorOuputDimA[1];
 		h = tensorOuputDimA[2]; w = tensorOuputDimA[3];
-		println("poolingForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("poolingForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		
 		setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);  
 	 
@@ -1192,7 +1192,7 @@ class network_t
 													tensorOuputDimA) );
 		n = tensorOuputDimA[0]; c = tensorOuputDimA[1];
 		h = tensorOuputDimA[2]; w = tensorOuputDimA[3];
-		println("poolingForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("poolingForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		
 		setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);  
 	 
@@ -1213,7 +1213,7 @@ class network_t
 						int& n, int& c, int& h, int& w,
 						value_type* diffData, value_type* srcData, cudnnTensorDescriptor_t lastTensorDesc)
 	{
-		println("poolingBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("poolingBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		// const int poolDims = 2;
 		// int windowDimA[poolDims] = {2,2};
 		// int paddingA[poolDims] = {0,0};
@@ -1235,7 +1235,7 @@ class network_t
 		// 											tensorOuputDimA) );
 		// n = tensorOuputDimA[0]; c = tensorOuputDimA[1];
 		// h = tensorOuputDimA[2]; w = tensorOuputDimA[3];
-		// println("pooling back::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("poolingback::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		
 		// setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);  
 
@@ -1255,7 +1255,7 @@ class network_t
 
 	void softmaxForward(int &n, int &c, int &h, int &w, value_type* srcData, value_type** dstData)
 	{
-		println("softmaxForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("softmaxForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		resize(n*c*h*w, dstData);
 
 		setTensorDesc(srcTensorDesc, tensorFormat, dataType, n, c, h, w);
@@ -1278,7 +1278,7 @@ class network_t
 						int &n, int &c, int &h, int &w, value_type* srcData)
 	{
 		// resize(n*c*h*w, &(layer.output_d));
-		println("softmaxForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("softmaxForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		setTensorDesc(srcTensorDesc, tensorFormat, dataType, n, c, h, w);
 		setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);
 
@@ -1312,7 +1312,7 @@ class network_t
 						int &n, int &c, int &h, int &w, 						
 						value_type* diffData)
 	{
-		println("softmaxBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("softmaxBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		// resize(n*c*h*w, &(layer.output_d));
 		checkCUDNN( cudnnSetTensor4dDescriptor(srcTensorDesc,
 												tensorFormat,
@@ -1408,7 +1408,7 @@ class network_t
 	void activationForward(const Layer_t<value_type>& act, 
 							int &n, int &c, int &h, int &w, value_type* srcData)
 	{
-		println("activationForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("activationForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		checkCUDNN( cudnnSetActivationDescriptor(activDesc,
 												CUDNN_ACTIVATION_SIGMOID,
 												CUDNN_PROPAGATE_NAN,
@@ -1493,7 +1493,7 @@ class network_t
 	void fullyConnectedBackward(const Layer_t<value_type>& layer,
 								int &n, int &c, int &h, int &w, value_type* srcData)
 	{
-		println("fullyConnectedBack::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("fullyConnectedBack::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 
 		value_type alpha = value_type(1), beta = value_type(0);
 		checkCudaErrors( CUBLAS_GEMV(cublasHandle, CUBLAS_OP_N,
@@ -1558,7 +1558,7 @@ class network_t
 							int &n, int &c, int &h, int &w, 
 							value_type *srcDiffData, value_type* srcData)
 	{
-		println("activationBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("activationBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		checkCUDNN( cudnnSetActivationDescriptor(activDesc,
 												CUDNN_ACTIVATION_SIGMOID,
 												CUDNN_PROPAGATE_NAN,
@@ -1764,10 +1764,10 @@ class network_t
 			if (toReal(result[id]) < toReal(result[i])) id = i;
 		}
 
-		println("\n");
-		print("Resulting weights from Softmax: ");
-		printDeviceVector(n*c*h*w, dstData);
-		println("\n");
+		// println("\n");
+		// print("Resulting weights from Softmax: ");
+		// printDeviceVector(n*c*h*w, dstData);
+		// println("\n");
 
 		checkCudaErrors( cudaFree(srcData) );
 		checkCudaErrors( cudaFree(dstData) );
@@ -1783,7 +1783,8 @@ class network_t
 						const Layer_t<value_type>& fc1act,
 						const Layer_t<value_type>& fc2,
 						const Layer_t<value_type>& fc2smax){
-		println("Performing forward propagation ...");
+		int n, c, h, w;
+		// println("Performing forward propagation ...");
 		n = c = 1; h = IMAGE_H; w = IMAGE_W;
 		convoluteForward(conv1, n, c, h, w, image_data_d);
 		poolForward(pool1, 		n, c, h, w, conv1.output_d);
@@ -1810,9 +1811,9 @@ class network_t
 			if (toReal(result[id]) < toReal(result[i])) id = i;
 		}
 
-		println("\n");
-		print("Resulting weights from Softmax: "); printDeviceVector(n*c*h*w, fc2smax.output_d);
-		println("\n");
+		// println("\n");
+		// print("Resulting weights from Softmax: "); printDeviceVector(n*c*h*w, fc2smax.output_d);
+		// println("\n");
 		return id;
 	}
 	int learn_example(value_type* image_data_d, 
@@ -1830,7 +1831,7 @@ class network_t
 		
 		int id = predict_example(image_data_d, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2smax);
 
-		println("Performing backward propagation ...");
+		// println("Performing backward propagation ...");
 		n = h = w = 1; c = fc2smax.outputs;
 		value_type *diffData = NULL;
 		getDiffData(fc2smax, target, &diffData);
@@ -1855,7 +1856,6 @@ class network_t
 		convolutionalUpdateWeights(conv2, pool2.del_d, pool1.output_d);
 		convolutionalUpdateWeights(conv1, pool1.del_d, image_data_d);
 
-		checkCudaErrors( cudaFree(image_data_d) );
 		checkCudaErrors( cudaFree(diffData) );
 		return id;
 	}
@@ -2186,6 +2186,8 @@ double *makeDiffData(int m, int c) {
   return diff;
 }
 
+typedef MATRIX_DATA_TYPE value_type;
+
 void readImageToDevice(const char* fname, value_type **image_data_d){
 	value_type imgData_h[IMAGE_H*IMAGE_W];
 	readImage(fname, imgData_h);
@@ -2196,7 +2198,7 @@ void readImageToDevice(const char* fname, value_type **image_data_d){
 int main(int argc, char *argv[])
 {   
 	// Define the precision you want to use: full (float), double (double)
-	typedef MATRIX_DATA_TYPE value_type;
+	
 
 	if (false){
 		int m = 1, c = 4, numChannels = 1;
@@ -2333,29 +2335,29 @@ int main(int argc, char *argv[])
 
 	srand(time(NULL));
 	
-	const char *conv1_bin = "conv1.bin";
-	const char *conv1_bias_bin = "conv1.bias.bin";
-	const char *conv2_bin = "conv2.bin";
-	const char *conv2_bias_bin = "conv2.bias.bin";
-	const char *ip1_bin = "ip1.bin";
-	const char *ip1_bias_bin = "ip1.bias.bin";
-	const char *ip2_bin = "ip2.bin";
-	const char *ip2_bias_bin = "ip2.bias.bin";
+	// const char *conv1_bin = "conv1.bin";
+	// const char *conv1_bias_bin = "conv1.bias.bin";
+	// const char *conv2_bin = "conv2.bin";
+	// const char *conv2_bias_bin = "conv2.bias.bin";
+	// const char *ip1_bin = "ip1.bin";
+	// const char *ip1_bias_bin = "ip1.bias.bin";
+	// const char *ip2_bin = "ip2.bin";
+	// const char *ip2_bias_bin = "ip2.bias.bin";
 
-	network_t<value_type> mnist;
-	Layer_t<value_type> _conv1(1,20,5,conv1_bin,conv1_bias_bin,argv[0]);
-	Layer_t<value_type> _conv2(20,50,5,conv2_bin,conv2_bias_bin,argv[0]);
-	Layer_t<value_type>   ip1(800,500,1,ip1_bin,ip1_bias_bin,argv[0]);
-	Layer_t<value_type>   ip2(500,10,1,ip2_bin,ip2_bias_bin,argv[0]);
+	// network_t<value_type> mnist;
+	// Layer_t<value_type> _conv1(1,20,5,conv1_bin,conv1_bias_bin,argv[0]);
+	// Layer_t<value_type> _conv2(20,50,5,conv2_bin,conv2_bias_bin,argv[0]);
+	// Layer_t<value_type>   ip1(800,500,1,ip1_bin,ip1_bias_bin,argv[0]);
+	// Layer_t<value_type>   ip2(500,10,1,ip2_bin,ip2_bias_bin,argv[0]);
 
-	const char *first_image = "one_28x28.pgm";
-	const char *second_image = "three_28x28.pgm";
-	const char *third_image = "five_28x28.pgm";
+	// const char *first_image = "one_28x28.pgm";
+	// const char *second_image = "three_28x28.pgm";
+	// const char *third_image = "five_28x28.pgm";
 
-	std::string image_path;
-	get_path(image_path, first_image, argv[0]);
-	int i1 = mnist.classify_example(image_path.c_str(), _conv1, _conv2, ip1, ip2);
-	println(i1);
+	// std::string image_path;
+	// get_path(image_path, first_image, argv[0]);
+	// int i1 = mnist.classify_example(image_path.c_str(), _conv1, _conv2, ip1, ip2);
+	// println(i1);
 
 	network_t<value_type> alexnet;
 	Layer_t<value_type> conv1; 	conv1.initConvLayer(1, 20, 5, IMAGE_H, IMAGE_W);
@@ -2368,10 +2370,10 @@ int main(int argc, char *argv[])
 	Layer_t<value_type> fc2; 	fc2.initFCLayer(fc1act.outputs, 10);
 	Layer_t<value_type> fc2smax; fc2smax.initLayer(fc2.outputs);
 
-	value_type* image_data_d = NULL;
-	readImageToDevice(image_path.c_str(), &image_data_d)
-	i1 = alexnet.learn_example(image_data_d, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2smax, 1);
-	println(i1);
+	// value_type* image_data_d = NULL;
+	// readImageToDevice(image_path.c_str(), &image_data_d);
+	// i1 = alexnet.learn_example(image_data_d, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2smax, 1);
+	// println(i1);
 
 	if (true)
 	{
@@ -2384,7 +2386,7 @@ int main(int argc, char *argv[])
 		value_type *training_data;
 		value_type *training_target;
 		int total_train_data, total_test_data;
-		mnist.loadData(&training_data, &testing_data, &training_target, &testing_target, total_train_data, total_test_data);
+		alexnet.loadData(&training_data, &testing_data, &training_target, &testing_target, total_train_data, total_test_data);
 		println("\n\nData Loaded. Training examples:"<<total_train_data/N<<" Testing examples:"<<total_test_data/N);
 	
 		// Shuffle training data
@@ -2422,18 +2424,19 @@ int main(int argc, char *argv[])
 	
 			// Learn all examples till convergence
 			value_type imgData_h[IMAGE_H*IMAGE_W];
+			value_type* image_data_d = NULL;
+			checkCudaErrors( cudaMalloc(&image_data_d, MSIZE(IMAGE_H*IMAGE_W)) );
 			int num_iterations = 5;
 			while(num_iterations--){ // Use a better convergence criteria
 				for (int i=0; i<m; i++){
 					if (DEBUG) print("\n\n\n\n\n");
 					const value_type *training_example = train_data+i*N;
 					value_type target = train_target[i];
-					for (int i = 0; i < N; i++)
+					for (int ii = 0; ii < N; ii++)
 					{
-						imgData_h[i] = training_example[i] / value_type(255);
+						imgData_h[ii] = training_example[ii] / value_type(255);
 					}
-					value_type* image_data_d = NULL;
-					checkCudaErrors( cudaMalloc(&image_data_d, MSIZE(IMAGE_H*IMAGE_W)) );
+					
 					checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, MSIZE(IMAGE_H*IMAGE_W), cudaMemcpyHostToDevice) );
 					value_type predicted = alexnet.learn_example(image_data_d, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2smax, target);
 					if (DEBUG) getchar();
@@ -2441,11 +2444,12 @@ int main(int argc, char *argv[])
 					//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
 				}
 			}
+			checkCudaErrors( cudaFree(image_data_d) );
 			println("\n **** Learning completed ****");
 			println("Learning Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
 			
-			input.copyDataToHost();
-			hidden.copyDataToHost();
+			// input.copyDataToHost();
+			// hidden.copyDataToHost();
 			// Save the weights in a binary file
 			// saveWeights("input_data.bin", input.inputs*input.outputs, input.data_h);
 			// saveWeights("input_bias.bin", input.outputs, input.bias_h);
@@ -2460,16 +2464,26 @@ int main(int argc, char *argv[])
 			start = std::clock(); 
 			int correct = 0;
 			int n = total_test_data/N;
+			value_type* image_data_d = NULL;
+			value_type imgData_h[IMAGE_H*IMAGE_W];
+			checkCudaErrors( cudaMalloc(&image_data_d, MSIZE(IMAGE_H*IMAGE_W)) );	
 			for (int i=0; i<n; i++){
 				const value_type *test_example = testing_data+i*N;
 				value_type target = testing_target[i];
+				for (int ii = 0; ii < N; ii++)
+				{
+					imgData_h[ii] = test_example[ii] / value_type(255);
+				}
+				
 				value_type predicted = alexnet.predict_example(image_data_d, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2smax);
+				
 				if (target == predicted){
 					correct++;
 				}
 				if (!DEBUG && i%1000==0) print("."<<std::flush);
 				//println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
 			}
+			checkCudaErrors( cudaFree(image_data_d) );
 			println("\n **** Testing completed ****\n");
 			println("Testing Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
 			println("Correctly predicted "<<correct<<" examples out of "<<n);
@@ -2489,7 +2503,7 @@ int main(int argc, char *argv[])
 		value_type *training_data;
 		value_type *training_target;
 		int total_train_data, total_test_data;
-		mnist.loadData(&training_data, &testing_data, &training_target, &testing_target, total_train_data, total_test_data);
+		alexnet.loadData(&training_data, &testing_data, &training_target, &testing_target, total_train_data, total_test_data);
 		println("\n\nData Loaded. Training examples:"<<total_train_data/N<<" Testing examples:"<<total_test_data/N);
 	
 		// Shuffle training data
@@ -2535,7 +2549,7 @@ int main(int argc, char *argv[])
 					if (DEBUG) print("\n\n\n\n\n");
 					const value_type *training_example = train_data+i*N;
 					value_type target = train_target[i];
-					value_type predicted = mnist.learnExample(&training_example, target, input, hidden);
+					value_type predicted = alexnet.learnExample(&training_example, target, input, hidden);
 					if (DEBUG) getchar();
 					else if (i%1000==0) print("."<<std::flush);
 					//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
@@ -2563,7 +2577,7 @@ int main(int argc, char *argv[])
 			for (int i=0; i<n; i++){
 				const value_type *test_example = testing_data+i*N;
 				value_type target = testing_target[i];
-				value_type predicted = mnist.predictExample(&test_example, target, input, hidden);
+				value_type predicted = alexnet.predictExample(&test_example, target, input, hidden);
 				if (target == predicted){
 					correct++;
 				}
