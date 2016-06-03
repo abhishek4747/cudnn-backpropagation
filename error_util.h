@@ -65,7 +65,7 @@
 #define checkCUDNN(status) {                                           \
     std::stringstream _error;                                          \
     if (status != CUDNN_STATUS_SUCCESS) {                              \
-    _error << "CUDNN failure\nError: " << cudnnGetErrorString(status); \
+    _error << "CUDNN failure\nError("<<(int)status<<"): " << cudnnGetErrorString(status); \
       FatalError(_error.str());                                        \
     }                                                                  \
 }
