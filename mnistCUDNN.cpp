@@ -1846,9 +1846,10 @@ class network_t
 		
 
 		c = fc1.outputs;
-		getBackPropData(fc1, fc2, target, dstDiffData, &targetData, &diffData, false);
+		// getBackPropData(fc1, fc2, target, dstDiffData, &targetData, &diffData, false);
+		fullyConnectedBackward(fc2, n, c, h, w, fc2smax.del_d);
 		
-		activationBackward(n, c, h, w, fc1act.output_d, diffData, diffData, &dstDiffData); 
+		activationBackward(n, c, h, w, fc1act.output_d, fc2.del_d, fc2.del_d, &dstDiffData); 
 		checkCudaErrors( cudaMemcpy(fc1act.del_d, dstDiffData, fc1.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
 		
 
