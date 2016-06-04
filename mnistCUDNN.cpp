@@ -1492,10 +1492,10 @@ class network_t
 	}
 
 	void fullyConnectedBackward(const Layer_t<value_type>& layer,
-								int &n, int &c, int &h, int &w, value_type* srcData)
+								int &n, int &c, int &h, int &w, value_type* srcData, value_type** diffData)
 	{
 		// println("fullyConnectedBack::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-
+		resize(layer.inputs, diffData);
 		value_type alpha = value_type(1), beta = value_type(0);
 		checkCudaErrors( CUBLAS_GEMV(cublasHandle, CUBLAS_OP_N,
 									  layer.inputs, layer.outputs,
@@ -1503,8 +1503,8 @@ class network_t
 									  layer.data_d, layer.inputs,
 									  srcData, 1,
 									  &beta,
-									  layer.del_d, 1) );
-		c = layer.inputs;
+									  *diffData, 1) );
+		// c = layer.inputs;
 	}
 
 	void activationBackward(int &n, int &c, int &h, int &w, value_type* srcData, value_type* dstData, value_type *srcDiffData, value_type **dstDiffData)
@@ -1841,16 +1841,19 @@ class network_t
 
 		value_type *dstDiffData = NULL, *targetData=NULL;
 		// getBackPropData(fc2, fc2, target, dstDiffData, &targetData, &diffData, true);
-		activationBackward(n, c, h, w, fc2smax.output_d, diffData, diffData, &dstDiffData);
-		checkCudaErrors( cudaMemcpy(fc2smax.del_d, dstDiffData, fc2.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
+		// activationBackward(n, c, h, w, fc2smax.output_d, diffData, diffData, &dstDiffData);
+		activationBackward(fc2smax, n, c, h, w, diffData, fc2.output_d);
+		// checkCudaErrors( cudaMemcpy(fc2smax.del_d, dstDiffData, fc2.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
 		
 
 		c = fc1.outputs;
-		// getBackPropData(fc1, fc2, target, dstDiffData, &targetData, &diffData, false);
-		fullyConnectedBackward(fc2, n, c, h, w, fc2smax.del_d);
+		// getBackPropData(fc1, fc2, target, fc2smax.del_d, &targetData, &diffData, false);
+		fullyConnectedBackward(fc2, n, c, h, w, fc2smax.del_d, &diffData);
+
 		
-		activationBackward(n, c, h, w, fc1act.output_d, fc2.del_d, fc2.del_d, &dstDiffData); 
-		checkCudaErrors( cudaMemcpy(fc1act.del_d, dstDiffData, fc1.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
+		// activationBackward(n, c, h, w, fc1act.output_d, diffData, diffData, &dstDiffData);
+		// checkCudaErrors( cudaMemcpy(fc1act.del_d, dstDiffData, fc1.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
+		activationBackward(fc1act, 	n, c, h, w, diffData, fc1.output_d);
 		
 
 
