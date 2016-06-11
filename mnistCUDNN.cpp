@@ -760,35 +760,6 @@ class network_t
 									data) );
 	}
 
-	void fullyConnectedForward(const Layer_t<value_type>& ip,
-						  int& n, int& c, int& h, int& w,
-						  value_type* srcData, value_type** dstData)
-	{
-		if (n != 1)
-		{
-			FatalError("Not Implemented"); 
-		}
-		int dim_x = c*h*w;
-		int dim_y = ip.outputs;
-		resize(dim_y, dstData);
-
-		scaling_type alpha = scaling_type(1), beta = scaling_type(1);
-		// place bias into dstData
-		checkCudaErrors( cudaMemcpy(*dstData, ip.bias_d, MSIZE(dim_y), cudaMemcpyDeviceToDevice) );
-		
-		// gemv(cublasHandle, dim_x, dim_y, alpha,
-		// 		ip.data_d, srcData, beta,*dstData);
-		checkCublasErrors( CUBLAS_GEMV(cublasHandle, CUBLAS_OP_T,
-                                  dim_x, dim_y,
-                                  &alpha,
-                                  ip.data_d, dim_x,
-                                  srcData, 1,
-                                  &beta,
-                                  *dstData, 1) );   
-
-		h = 1; w = 1; c = dim_y;
-	}
-
 	void fullyConnectedForward(const Layer_t<value_type>& layer,
 						  int& n, int& c, int& h, int& w,
 						  value_type* srcData)
@@ -817,133 +788,6 @@ class network_t
                                   layer.output_d, 1) );    
 
 		h = 1; w = 1; c = dim_y;
-	}
-
-	void convoluteForward(const Layer_t<value_type>& conv,
-						  int& n, int& c, int& h, int& w,
-						  value_type* srcData, value_type** dstData)
-	{
-		cudnnConvolutionFwdAlgo_t algo;
-
-		setTensorDesc(srcTensorDesc, tensorFormat, dataType, n, c, h, w);
-
-		const int tensorDims = 4;
-		int tensorOuputDimA[tensorDims] = {n,c,h,w};
-		const int filterDimA[tensorDims] = {conv.outputs, conv.inputs, 
-										conv.kernel_dim, conv.kernel_dim};
-									   
-		checkCUDNN( cudnnSetFilterNdDescriptor(filterDesc,
-											  dataType,
-											  CUDNN_TENSOR_NCHW,
-											  tensorDims,
-											  filterDimA) );
- 
-		const int convDims = 2;
-		int padA[convDims] = {0,0};
-		int filterStrideA[convDims] = {1,1};
-		int upscaleA[convDims] = {1,1};
-		cudnnDataType_t  convDataType = dataType;
-		checkCUDNN( cudnnSetConvolutionNdDescriptor(convDesc,
-													convDims,
-													padA,
-													filterStrideA,
-													upscaleA,
-													CUDNN_CROSS_CORRELATION,
-													convDataType) );
-		// find dimension of convolution output
-		checkCUDNN( cudnnGetConvolutionNdForwardOutputDim(convDesc,
-												srcTensorDesc,
-												filterDesc,
-												tensorDims,
-												tensorOuputDimA) );
-		n = tensorOuputDimA[0]; c = tensorOuputDimA[1];
-		h = tensorOuputDimA[2]; w = tensorOuputDimA[3];
-
-		// println("convoluteForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-		setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);
-		#if 0
-		if (convAlgorithm < 0)
-		{
-			// Choose the best according to the preference
-			println("Testing cudnnGetConvolutionForwardAlgorithm ...");
-			checkCUDNN( cudnnGetConvolutionForwardAlgorithm(cudnnHandle,
-													srcTensorDesc,
-													filterDesc,
-													convDesc,
-													dstTensorDesc,
-													CUDNN_CONVOLUTION_FWD_PREFER_FASTEST,
-													0,
-													&algo
-													) );
-			println("Fastest algorithm is Algo " << algo);
-			convAlgorithm = algo;
-			// New way of finding the fastest config
-			// Setup for findFastest call
-			println("Testing cudnnFindConvolutionForwardAlgorithm ...");
-			int requestedAlgoCount = 5; 
-			int returnedAlgoCount[1];
-			cudnnConvolutionFwdAlgoPerf_t *results = (cudnnConvolutionFwdAlgoPerf_t*)malloc(
-				sizeof(cudnnConvolutionFwdAlgoPerf_t)*requestedAlgoCount);
-			checkCUDNN(cudnnFindConvolutionForwardAlgorithm( cudnnHandle, 
-													 srcTensorDesc,
-													 filterDesc,
-													 convDesc,
-													 dstTensorDesc,
-													 requestedAlgoCount,
-													 returnedAlgoCount,
-													 results
-												   ) );
-			for(int algoIndex = 0; algoIndex < *returnedAlgoCount; ++algoIndex){
-				printf("^^^^ %s for Algo %d: %f time requiring %llu memory\n", 
-					cudnnGetErrorString(results[algoIndex].status), results[algoIndex].algo, results[algoIndex].time, 
-					(unsigned long long)results[algoIndex].memory);
-			}
-			free(results);
-		}
-		else
-		{
-			algo = (cudnnConvolutionFwdAlgo_t)convAlgorithm;
-			if (algo == CUDNN_CONVOLUTION_FWD_ALGO_FFT)
-			{
-				//println("Using FFT for convolution");
-			}
-		}
-		#endif
-
-		resize(n*c*h*w, dstData);
-		size_t sizeInBytes=0;
-		void* workSpace=NULL;
-		checkCUDNN( cudnnGetConvolutionForwardWorkspaceSize(cudnnHandle,
-												srcTensorDesc,
-												filterDesc,
-												convDesc,
-												dstTensorDesc,
-												algo,
-												&sizeInBytes) );
-		if (sizeInBytes!=0)
-		{
-		  checkCudaErrors( cudaMalloc(&workSpace,sizeInBytes) );
-		}
-		scaling_type alpha = scaling_type(1);
-		scaling_type beta  = scaling_type(0);
-		checkCUDNN( cudnnConvolutionForward(cudnnHandle,
-											  &alpha,
-											  srcTensorDesc,
-											  srcData,
-											  filterDesc,
-											  conv.data_d,
-											  convDesc,
-											  algo,
-											  workSpace,
-											  sizeInBytes,
-											  &beta,
-											  dstTensorDesc,
-											  *dstData) );
-		addBias(dstTensorDesc, conv, c, *dstData);
-		if (sizeInBytes!=0)
-		{
-		  checkCudaErrors( cudaFree(workSpace) );
-		}
 	}
 
 	void convoluteForward(const Layer_t<value_type>& conv,
@@ -1065,48 +909,6 @@ class network_t
 		}
 	}
 
-	void poolForward( int& n, int& c, int& h, int& w,
-					  value_type* srcData, value_type** dstData)
-	{
-		const int poolDims = 2;
-		int windowDimA[poolDims] = {2,2};
-		int paddingA[poolDims] = {0,0};
-		int strideA[poolDims] = {2,2};
-		checkCUDNN( cudnnSetPoolingNdDescriptor(poolingDesc,
-												CUDNN_POOLING_MAX,
-												CUDNN_PROPAGATE_NAN,
-												poolDims,
-												windowDimA,
-												paddingA,
-												strideA ) );
-
-		setTensorDesc(srcTensorDesc, tensorFormat, dataType, n, c, h, w);        
-
-		const int tensorDims = 4;
-		int tensorOuputDimA[tensorDims] = {n,c,h,w};
-		checkCUDNN( cudnnGetPoolingNdForwardOutputDim(poolingDesc,
-													srcTensorDesc,
-													tensorDims,
-													tensorOuputDimA) );
-		n = tensorOuputDimA[0]; c = tensorOuputDimA[1];
-		h = tensorOuputDimA[2]; w = tensorOuputDimA[3];
-		// println("poolingForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-		
-		setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);  
-	 
-		resize(n*c*h*w, dstData);
-		scaling_type alpha = scaling_type(1);
-		scaling_type beta = scaling_type(0);
-		checkCUDNN( cudnnPoolingForward(cudnnHandle,
-										  poolingDesc,
-										  &alpha,
-										  srcTensorDesc,
-										  srcData,
-										  &beta,
-										  dstTensorDesc,
-										  *dstData) );
-	}
-
 	void poolForward(const Layer_t<value_type>& layer,
 					  int& n, int& c, int& h, int& w,
 					  value_type* srcData)
@@ -1195,27 +997,6 @@ class network_t
 											layer.poolSrcTensor, layer.del_d));
 		if (DEBUG) printDeviceVector("Pooling back Output: ", layer.inputs, layer.del_d);
 
-	}
-
-	void softmaxForward(int &n, int &c, int &h, int &w, value_type* srcData, value_type** dstData)
-	{
-		// println("softmaxForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-		resize(n*c*h*w, dstData);
-
-		setTensorDesc(srcTensorDesc, tensorFormat, dataType, n, c, h, w);
-		setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);
-
-		scaling_type alpha = scaling_type(1);
-		scaling_type beta  = scaling_type(0);
-		checkCUDNN( cudnnSoftmaxForward(cudnnHandle,
-										  CUDNN_SOFTMAX_ACCURATE ,
-										  CUDNN_SOFTMAX_MODE_CHANNEL,
-										  &alpha,
-										  srcTensorDesc,
-										  srcData,
-										  &beta,
-										  dstTensorDesc,
-										  *dstData) );
 	}
 
 	void softmaxForward(const Layer_t<value_type>& layer, 
@@ -1326,30 +1107,6 @@ class network_t
 											*dstData) );
 	}
 
-	void activationForward(int &n, int &c, int &h, int &w, value_type* srcData, value_type** dstData)
-	{
-		checkCUDNN( cudnnSetActivationDescriptor(activDesc,
-												CUDNN_ACTIVATION_SIGMOID,
-												CUDNN_PROPAGATE_NAN,
-												0.0) );
-	
-		resize(n*c*h*w, dstData);
-
-		setTensorDesc(srcTensorDesc, tensorFormat, dataType, n, c, h, w);
-		setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);
-
-		scaling_type alpha = scaling_type(1);
-		scaling_type beta  = scaling_type(0);
-		checkCUDNN( cudnnActivationForward(cudnnHandle,
-											activDesc,
-											&alpha,
-											srcTensorDesc,
-											srcData,
-											&beta,
-											dstTensorDesc,
-											*dstData) );    
-	}
-
 	void activationForward(const Layer_t<value_type>& layer, 
 							int &n, int &c, int &h, int &w, value_type* srcData)
 	{
@@ -1376,65 +1133,6 @@ class network_t
 											layer.output_d) );    
 	}
 
-	void fullyConnectedBackward(const Layer_t<value_type>& current_layer, const value_type* last_input){
-		int dim_x = current_layer.inputs;
-		int dim_y = current_layer.outputs;
-		int dim_z = 1;
-		value_type* dstData = NULL;
-		resize(dim_x*dim_y, &dstData);
-
-		value_type alpha = value_type(1), beta = value_type(0);
-		// checkCudaErrors( cudaMemcpy(*dstData, ip.bias_d, MSIZE(ip.outputs), cudaMemcpyDeviceToDevice) );
-		//if (DEBUG) printDeviceVector("last_input: \n", current_layer.inputs, last_input);
-		//if (DEBUG) printDeviceVector("del_W: \n", current_layer.outputs, current_layer.del_d);
-		
-		checkCudaErrors( CUBLAS_GEMM(cublasHandle, 
-									  CUBLAS_OP_N, CUBLAS_OP_N,
-									  dim_x, dim_y, dim_z,
-									  &alpha,
-									  last_input, dim_x,
-									  current_layer.del_d, dim_z,
-									  &beta,
-									  dstData, dim_x) );
-		
-		if (DEBUG) printDeviceVector("\tdelta_W (del_W*hidden_input): \n", current_layer.inputs*current_layer.outputs, dstData);
-
-		alpha = value_type(0.1); // learning rate
-		beta = value_type(1); 
-		//checkCudaErrors( cublasDscal(cublasHandle, ip.inputs*ip.outputs, &alpha, ip.data_d, 1); 
-		const value_type* B = current_layer.data_d;
-		// C = α op ( A ) + β * C
-		// C = 0.1 * delta_W2 + C
-		if (DEBUG) printDeviceVector("\tW = W + 0.1*delta_W: old\n", dim_x*dim_y, current_layer.data_d);
-		
-		checkCudaErrors( CUBLAS_GEAM(cublasHandle,
-										CUBLAS_OP_N, CUBLAS_OP_N,
-										dim_x, dim_y,
-										&alpha,
-										dstData, dim_x,
-										&beta,
-										B, dim_x,
-										current_layer.data_d, dim_x) );
-		if (DEBUG) printDeviceVector("\tW: \n", dim_x*dim_y, current_layer.data_d);
-
-		// place bias into dstData
-		dim_x = 1;
-		const value_type* B2 = current_layer.bias_d;
-		if (DEBUG) printDeviceVector("\tdel_W:\n", current_layer.outputs, current_layer.del_d);
-		if (DEBUG) printDeviceVector("\tB = B + 0.1*del_W: old\n", current_layer.outputs, current_layer.bias_d);
-		checkCudaErrors( CUBLAS_GEAM(cublasHandle,
-										CUBLAS_OP_N, CUBLAS_OP_N,
-										dim_x, dim_y,
-										&alpha,
-										current_layer.del_d, dim_x,
-										&beta,
-										B2, dim_x,
-										current_layer.bias_d, dim_x) );
-		if (DEBUG) printDeviceVector("\tB:\n", current_layer.outputs, current_layer.bias_d);
-
-		checkCudaErrors( cudaFree(dstData));
-	}
-
 	void fullyConnectedBackward(const Layer_t<value_type>& layer,
 								int &n, int &c, int &h, int &w, value_type* srcData, value_type** diffData)
 	{
@@ -1448,55 +1146,7 @@ class network_t
 									  srcData, 1,
 									  &beta,
 									  *diffData, 1) );
-		// c = layer.inputs;
-	}
-
-	void activationBackward(int &n, int &c, int &h, int &w, value_type* srcData, value_type* dstData, value_type *srcDiffData, value_type **dstDiffData)
-	{
-		checkCUDNN( cudnnSetActivationDescriptor(activDesc,
-												CUDNN_ACTIVATION_SIGMOID,
-												CUDNN_PROPAGATE_NAN,
-												0.0) );
-		resize(n*c*h*w, dstDiffData);
-		checkCUDNN( cudnnSetTensor4dDescriptor(srcTensorDesc,
-												tensorFormat,
-												dataType,
-												n, c,
-												h,
-												w) );
-		checkCUDNN( cudnnSetTensor4dDescriptor(dstTensorDesc,
-												tensorFormat,
-												dataType,
-												n, c,
-												h,
-												w) );
-		checkCUDNN( cudnnSetTensor4dDescriptor(srcDiffTensorDesc,
-												tensorFormat,
-												dataType,
-												n, c,
-												h,
-												w) );
-		checkCUDNN( cudnnSetTensor4dDescriptor(dstDiffTensorDesc,
-												tensorFormat,
-												dataType,
-												n, c,
-												h,
-												w) );
-		value_type alpha = value_type(1);
-		value_type beta  = value_type(0);
-		checkCUDNN( cudnnActivationBackward(cudnnHandle,
-											activDesc, // RELU
-											&alpha,
-											srcTensorDesc,
-											srcData,
-											srcDiffTensorDesc,
-											srcDiffData,
-											dstTensorDesc,
-											dstData,
-											&beta,
-											dstDiffTensorDesc,
-											*dstDiffData
-											) );    
+		c = layer.inputs;
 	}
 
 	void activationBackward(const Layer_t<value_type>& layer,
@@ -1676,59 +1326,6 @@ class network_t
 		if (DEBUG) getchar();
 	}
 
-	int classify_example(const char* fname, const Layer_t<value_type>& conv1,
-						  const Layer_t<value_type>& conv2,
-						  const Layer_t<value_type>& ip1,
-						  const Layer_t<value_type>& ip2)
-	{
-		int n,c,h,w;
-		value_type *srcData = NULL, *dstData = NULL;
-		value_type imgData_h[N];
-
-		readImage(fname, imgData_h);
-
-		if (DEBUG) println("Performing forward propagation ...");
-
-		checkCudaErrors( cudaMalloc(&srcData, MSIZE(N)) );
-		checkCudaErrors( cudaMemcpy(srcData, imgData_h,
-									MSIZE(N),
-									cudaMemcpyHostToDevice) );
-
-		n = c = 1; h = IMAGE_H; w = IMAGE_W;
-		convoluteForward(conv1, n, c, h, w, srcData, &dstData);
-		poolForward(n, c, h, w, dstData, &srcData);
-
-		convoluteForward(conv2, n, c, h, w, srcData, &dstData);
-		poolForward(n, c, h, w, dstData, &srcData);
-
-		fullyConnectedForward(ip1, n, c, h, w, srcData, &dstData);
-		activationForward(n, c, h, w, dstData, &srcData);
-		lrnForward(n, c, h, w, srcData, &dstData);
-
-		fullyConnectedForward(ip2, n, c, h, w, dstData, &srcData);
-		softmaxForward(n, c, h, w, srcData, &dstData);
-
-		const int max_digits = 10;
-		// Take care of half precision
-		Convert<scaling_type> toReal;
-		value_type result[max_digits];
-		checkCudaErrors( cudaMemcpy(result, dstData, MSIZE(max_digits), cudaMemcpyDeviceToHost) );
-		int id = 0;
-		for (int i = 1; i < max_digits; i++)
-		{
-			if (toReal(result[id]) < toReal(result[i])) id = i;
-		}
-
-		// println("\n");
-		// print("Resulting weights from Softmax: ");
-		// printDeviceVector(n*c*h*w, dstData);
-		// println("\n");
-
-		checkCudaErrors( cudaFree(srcData) );
-		checkCudaErrors( cudaFree(dstData) );
-		return id;
-	}
-
 	int predict_example(value_type* image_data_d, 
 						const Layer_t<value_type>& conv1,
 						const Layer_t<value_type>& pool1,
@@ -1737,7 +1334,7 @@ class network_t
 						const Layer_t<value_type>& fc1,
 						const Layer_t<value_type>& fc1act,
 						const Layer_t<value_type>& fc2,
-						const Layer_t<value_type>& fc2smax)
+						const Layer_t<value_type>& fc2act)
 	{
 		int n, c, h, w;
 		if (DEBUG) println("Performing forward propagation ...");
@@ -1748,22 +1345,20 @@ class network_t
 		convoluteForward(conv2, n, c, h, w, pool1.output_d);
 		poolForward(pool2, 		n, c, h, w, conv2.output_d);
 
-		// fullyConnectedForward(fc1, 	n, c, h, w, pool1.output_d);
 		fullyConnectedForward(fc1, 	n, c, h, w, pool2.output_d);
-		// fullyConnectedForward(fc1, 	n, c, h, w, image_data_d);
 		activationForward(fc1act, 	n, c, h, w, fc1.output_d);
 		
 		// lrnForward(n, c, h, w, srcData, &dstData);
 
 		fullyConnectedForward(fc2, 	n, c, h, w, fc1act.output_d);
-		activationForward(fc2smax, 	n, c, h, w, fc2.output_d);
-		// softmaxForward(fc2smax, 	n, c, h, w, fc2.output_d);
+		activationForward(fc2act, 	n, c, h, w, fc2.output_d);
+		// softmaxForward(fc2act, 	n, c, h, w, fc2.output_d);
 
-		const int max_digits = fc2smax.outputs;
+		const int max_digits = fc2act.outputs;
 		// Take care of half precision
 		Convert<scaling_type> toReal;
 		value_type result[max_digits];
-		checkCudaErrors( cudaMemcpy(result, fc2smax.output_d, MSIZE(max_digits), cudaMemcpyDeviceToHost) );
+		checkCudaErrors( cudaMemcpy(result, fc2act.output_d, MSIZE(max_digits), cudaMemcpyDeviceToHost) );
 		int id = 0;
 		for (int i = 1; i < max_digits; i++)
 		{
@@ -1771,7 +1366,7 @@ class network_t
 		}
 
 		// println("\n");
-		// print("Resulting weights from Softmax: "); printDeviceVector(n*c*h*w, fc2smax.output_d);
+		// print("Resulting weights from Softmax: "); printDeviceVector(n*c*h*w, fc2act.output_d);
 		// println("\n");
 		return id;
 	}
@@ -1783,176 +1378,40 @@ class network_t
 						const Layer_t<value_type>& fc1,
 						const Layer_t<value_type>& fc1act,
 						const Layer_t<value_type>& fc2,
-						const Layer_t<value_type>& fc2smax,
+						const Layer_t<value_type>& fc2act,
 						int target)
 	{
 		int n,c,h,w;
 		
-		int id = predict_example(image_data_d, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2smax);
+		int id = predict_example(image_data_d, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act);
 
 		//if (DEBUG) println("Performing backward propagation ...");
-		n = h = w = 1; c = fc2smax.outputs;
+		n = h = w = 1; c = fc2act.outputs;
+
 		value_type *diffData = NULL;
-		getDiffData(fc2smax, target, &diffData);
+		getDiffData(fc2act, target, &diffData);
 
-		activationBackward(fc2smax, n, c, h, w, diffData, fc2.output_d);		
-
-		c = fc1.outputs;
-		fullyConnectedBackward(fc2, n, c, h, w, fc2smax.del_d, &diffData);
+		activationBackward(fc2act,	n, c, h, w, diffData, fc2.output_d);
+		fullyConnectedBackward(fc2, n, c, h, w, fc2act.del_d, &diffData);
 
 		activationBackward(fc1act, 	n, c, h, w, diffData, fc1.output_d);
 		fullyConnectedBackward(fc1, n, c, h, w, fc1act.del_d, &diffData);		
 
 
-/*
-		// softmaxBackward(fc2smax, 	n, c, h, w, diffData);
-		activationBackward(fc2smax, n, c, h, w, diffData, fc2.output_d);
-		fullyConnectedBackward(fc2, n, c, h, w, fc2smax.del_d);
-
-		//lrnBackward(n, c, h, w, src)
-
-		activationBackward(fc1act, 	n, c, h, w, fc2.del_d, fc1.output_d);
-		fullyConnectedBackward(fc1, n, c, h, w, fc1act.del_d);
-*/
 		poolBackward(pool2,			n, c, h, w, diffData, conv2.output_d, conv2.convTensor);
 		convoluteBackward(conv2,	n, c, h, w, pool2.del_d);
 
 		poolBackward(pool1,			n, c, h, w, conv2.del_d, conv1.output_d, conv1.convTensor);
-		// poolBackward(pool1,			n, c, h, w, diffData, conv1.output_d, conv1.convTensor);
-		// convoluteBackward(conv1,	n, c, h, w, pool1.del_d); // don't need this
 
 
-		fullyConnectedUpdateWeights(fc2, fc2smax.del_d, fc1act.output_d);
-		// fullyConnectedUpdateWeights(fc1, fc1act.del_d,  image_data_d);
+		// Update Weights
+		fullyConnectedUpdateWeights(fc2, fc2act.del_d, fc1act.output_d);
 		fullyConnectedUpdateWeights(fc1, fc1act.del_d,  pool1.output_d);
-		// fullyConnectedUpdateWeights(fc1, fc1act.del_d,  pool2.output_d);
+
 		convolutionalUpdateWeights(conv2, pool2.del_d, pool1.output_d);
 		convolutionalUpdateWeights(conv1, pool1.del_d, image_data_d);
 
 		checkCudaErrors( cudaFree(diffData) );
-		return id;
-	}
-
-	int predictExample(const value_type** image_data, value_type target, const Layer_t<value_type>& input, const Layer_t<value_type>& hidden){
-		
-		value_type *image_data_d = NULL;
-		value_type imgData_h[N];
-
-		// Plot to console and normalize image to be in range [0,1]
-		for (int i = 0; i < N; i++)
-		{
-			imgData_h[i] = (*image_data)[i] / value_type(255);
-			#if 0
-			print((imgData_h[i]>0?"#":" ")<<" ");
-			if (i%IMAGE_W==IMAGE_W-1)
-				println(" ");
-			#endif
-		}
-		resize(N, &image_data_d);
-		checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, MSIZE(N), cudaMemcpyHostToDevice) );
-		int id = predictExampleDevice(image_data_d, target, input, hidden);
-		checkCudaErrors( cudaFree(image_data_d) );
-		return id;
-	}
-
-	int predictExampleDevice(const value_type* image_data_d, value_type target, const Layer_t<value_type>& input, const Layer_t<value_type>& hidden){
-		int n,c,h,w;
-		value_type *srcData = NULL, *dstData = NULL;
-		if (DEBUG) println("\nTarget: "<<target);
-
-		// Setup Variables for forward propagation
-		//checkCudaErrors( cudaMalloc(&srcData, MSIZE(N)) ); 
-		resize(N, &srcData);
-		checkCudaErrors( cudaMemcpy(srcData, image_data_d,  MSIZE(N), cudaMemcpyDeviceToDevice) );
-		n = c = 1; h = IMAGE_H; w = IMAGE_W;
-		// Perform Forward propagation
-		if (DEBUG) println("Performing forward propagation ...");
- 
-		if (DEBUG) printDeviceVector("input: \n", input.inputs, srcData);
-		fullyConnectedForward(input, n, c, h, w, srcData, &dstData);
-		if (DEBUG) printDeviceVector("fullyConnectedforward: \n", input.outputs, dstData);
-		activationForward(n, c, h, w, dstData, &srcData);
-		checkCudaErrors( cudaMemcpy(input.output_d, srcData, MSIZE(input.outputs), cudaMemcpyDeviceToDevice) );
-		if (DEBUG) printDeviceVector("Hidden layer outputs: \n", n*c*h*w, input.output_d);
-
-		fullyConnectedForward(hidden, n, c, h, w, srcData, &dstData);
-		if (DEBUG) printDeviceVector("fullyConnectedforward: \n", hidden.outputs, dstData);
-		activationForward(n, c, h, w, dstData, &srcData);
-		checkCudaErrors( cudaMemcpy(hidden.output_d, srcData, MSIZE(hidden.outputs), cudaMemcpyDeviceToDevice) );
-		if (DEBUG) printDeviceVector("Output layer outputs: \n", n*c*h*w, hidden.output_d);
-		
-		// Setup Variables for backward propagation
-		const int max_digits = hidden.outputs; //n*c*h*w; //10;
-		value_type result[max_digits];
-		checkCudaErrors( cudaMemcpy(result, srcData, MSIZE(max_digits), cudaMemcpyDeviceToHost) );
-		int id = 0;
-		for (int i = 1; i < max_digits; i++){
-			if (result[id] < result[i]) 
-				id = i;
-		}
-
-		checkCudaErrors( cudaFree(srcData) );
-		checkCudaErrors( cudaFree(dstData) );
-		return id;
-	}
-
-	int learnExample(const value_type** image_data, value_type target, const Layer_t<value_type>& input,
-						  const Layer_t<value_type>& hidden)
-	{
-	   
-		value_type *image_data_d = NULL;
-		value_type imgData_h[N];
-
-		// Plot to console and normalize image to be in range [0,1]
-		for (int i = 0; i < N; i++)
-		{
-			imgData_h[i] = (*image_data)[i] / value_type(255);
-			#if 0
-			print((imgData_h[i]>0?"#":" ")<<" ");
-			if (i%IMAGE_W==IMAGE_W-1)
-				println(" ")
-			#endif
-		}
-		resize(N, &image_data_d);
-		checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, MSIZE(N), cudaMemcpyHostToDevice) );
-		// int id = predictExampleDevice(image_data_d, target, input, hidden);
-		int id = predict_example(image_data_d, input, input, input, input, input, input, hidden, hidden);
-		if (DEBUG) println("Prediction: "<<id);
-		
-		
-		value_type *srcDiffData = NULL, *dstDiffData = NULL, *targetData = NULL;
-		int n, c, h, w;
-
-		// Perform backward propagation
-		if (DEBUG) println("\nPerforming backward propagation ...");
-		c = hidden.outputs; n = h = w = 1;
-
-		getBackPropData(hidden, hidden, target, dstDiffData, &targetData, &srcDiffData, true);
-		//THEORY: delW2 = (target-output)*output*(1-output)
-		//				= srcDiffData * hidden.output_d * (1-hidden.output_d)
-		activationBackward(n, c, h, w, hidden.output_d, targetData, srcDiffData, &dstDiffData);
-		checkCudaErrors( cudaMemcpy(hidden.del_d, dstDiffData, MSIZE(hidden.outputs), cudaMemcpyDeviceToDevice) );
-		if (DEBUG) printDeviceVector("delW2: \n", hidden.outputs, hidden.del_d);
-
-		c = input.outputs;
-		getBackPropData(input, hidden, target, dstDiffData, &targetData, &srcDiffData, false);
-		//THEORY: del_W1 = (del_W2*W2')*hidden_output*(1-hidden_output)
-		// 				 =  srcdiffData*input.output_d*(1-input.output)
-		//				 = del_weights * derivativeof(inputs)
-		if (DEBUG) printDeviceVector("\thidden_output: \n", input.outputs, input.output_d);
-		activationBackward(n, c, h, w, input.output_d, targetData, srcDiffData, &dstDiffData); 
-		checkCudaErrors( cudaMemcpy(input.del_d, dstDiffData, MSIZE(input.outputs), cudaMemcpyDeviceToDevice) );
-		if (DEBUG) printDeviceVector("delW1: \n", input.outputs, input.del_d);
-
-
-		fullyConnectedBackward(hidden, input.output_d);
-		fullyConnectedBackward(input, image_data_d);
-
-		// Free Memory
-		checkCudaErrors( cudaFree(image_data_d) );
-		checkCudaErrors( cudaFree(srcDiffData) );
-		checkCudaErrors( cudaFree(dstDiffData) );
-		checkCudaErrors( cudaFree(targetData) );
 		return id;
 	}
 	
@@ -2189,7 +1648,7 @@ int main(int argc, char *argv[])
 		Layer_t<value_type> fc1;	fc1.initFCLayer((conv2.outputs*conv2.out_width*conv2.out_height) / (pool2.stride * pool2.stride), 500);
 		Layer_t<value_type> fc1act; fc1act.initLayer(fc1.outputs);
 		Layer_t<value_type> fc2; 	fc2.initFCLayer(fc1act.outputs, 10);
-		Layer_t<value_type> fc2smax; fc2smax.initLayer(fc2.outputs);
+		Layer_t<value_type> fc2act; fc2act.initLayer(fc2.outputs);
 	
 		// Contains Training and Testing Examples
 		value_type *train_data, *testing_data;
@@ -2258,7 +1717,7 @@ int main(int argc, char *argv[])
 					}
 					
 					checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, MSIZE(N), cudaMemcpyHostToDevice) );
-					value_type predicted = alexnet.learn_example(image_data_d, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2smax, target);
+					value_type predicted = alexnet.learn_example(image_data_d, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, target);
 					if (DEBUG) getchar();
 					else if (i%1000==0) print("."<<std::flush);
 					//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
@@ -2300,7 +1759,7 @@ int main(int argc, char *argv[])
 					}
 				}
 				checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, MSIZE(N), cudaMemcpyHostToDevice) );
-				value_type predicted = alexnet.predict_example(image_data_d, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2smax);
+				value_type predicted = alexnet.predict_example(image_data_d, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act);
 				
 				if (target == predicted){
 					correct++;
