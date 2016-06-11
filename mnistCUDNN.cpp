@@ -541,7 +541,7 @@ struct Layer_t
 		data_h 	= new value_type[w_size];
 		bias_h 	= new value_type[b_size];
 		output_h = new value_type[outputs];
-		del_h 	= new value_type[outputs];
+		del_h 	= new value_type[inputs];
 
 		// Random Initialization
 		// TODO : Fix this random initialization
@@ -549,17 +549,21 @@ struct Layer_t
 			data_h[i] = (((value_type)rand())/(rand()+1))/100000;
 		for (int i=0; i<b_size; i++)
 			bias_h[i] = (((value_type)rand())/(rand()+1))/100000;			
-		for (int i=0; i<outputs; i++){
+		for (int i=0; i<outputs; i++)
 			output_h[i]=0;
+		for (int i=0; i<inputs; i++)
 			del_h[i]=0;
-		}
+		
 		
 		checkCudaErrors( cudaMalloc(&data_d, 	MSIZE(w_size)) );
 		checkCudaErrors( cudaMalloc(&bias_d, 	MSIZE(b_size)) );
 		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs)) );
-		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(outputs)) );
+		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(inputs)) );
 
-		copyDataToDevice();
+		if (data_h!=NULL) 	checkCudaErrors( cudaMemcpy(data_d, 	data_h, 	MSIZE(w_size), 	cudaMemcpyHostToDevice) );
+		if (bias_h!=NULL) 	checkCudaErrors( cudaMemcpy(bias_d, 	bias_h, 	MSIZE(b_size), 	cudaMemcpyHostToDevice) );
+		if (output_h!=NULL) checkCudaErrors( cudaMemcpy(output_d, 	output_h, 	MSIZE(b_size),	cudaMemcpyHostToDevice) );
+		if (del_h!=NULL) 	checkCudaErrors( cudaMemcpy(del_d, 		del_h, 		MSIZE(inputs),	cudaMemcpyHostToDevice) );
 	}
 
 	void initLayer(int _outputs){
@@ -956,33 +960,9 @@ class network_t
 
 	void poolBackward(const Layer_t<value_type>& layer,
 						int& n, int& c, int& h, int& w,
-						value_type* diffData, value_type* srcData, cudnnTensorDescriptor_t lastTensorDesc)
+						value_type* diffData, value_type* srcData)
 	{
-		// println("poolingBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-		// const int poolDims = 2;
-		// int windowDimA[poolDims] = {2,2};
-		// int paddingA[poolDims] = {0,0};
-		// int strideA[poolDims] = {2,2};
-		// checkCUDNN( cudnnSetPoolingNdDescriptor(poolingDesc,
-		// 										CUDNN_POOLING_MAX,
-		// 										CUDNN_PROPAGATE_NAN,
-		// 										poolDims,
-		// 										windowDimA,
-		// 										paddingA,
-		// 										strideA ) );
-
-		// setTensorDesc(srcTensorDesc, tensorFormat, dataType, n, c, h, w); 
-		// const int tensorDims = 4;
-		// int tensorOuputDimA[tensorDims] = {n,c,h,w};
-		// checkCUDNN( cudnnGetPoolingNdForwardOutputDim(poolingDesc,
-		// 											srcTensorDesc,
-		// 											tensorDims,
-		// 											tensorOuputDimA) );
-		// n = tensorOuputDimA[0]; c = tensorOuputDimA[1];
-		// h = tensorOuputDimA[2]; w = tensorOuputDimA[3];
 		if (DEBUG) println("poolingback::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-		
-		// setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);  
 
 		value_type alpha = value_type(1.0);
 		value_type beta  = value_type(0.0);
@@ -1134,10 +1114,9 @@ class network_t
 	}
 
 	void fullyConnectedBackward(const Layer_t<value_type>& layer,
-								int &n, int &c, int &h, int &w, value_type* srcData, value_type** diffData)
+								int &n, int &c, int &h, int &w, value_type* srcData)
 	{
 		// println("fullyConnectedBack::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-		resize(layer.inputs, diffData);
 		value_type alpha = value_type(1), beta = value_type(0);
 		checkCudaErrors( CUBLAS_GEMV(cublasHandle, CUBLAS_OP_N,
 									  layer.inputs, layer.outputs,
@@ -1145,7 +1124,7 @@ class network_t
 									  layer.data_d, layer.inputs,
 									  srcData, 1,
 									  &beta,
-									  *diffData, 1) );
+									  layer.del_d, 1) );
 		c = layer.inputs;
 	}
 
@@ -1392,16 +1371,16 @@ class network_t
 		getDiffData(fc2act, target, &diffData);
 
 		activationBackward(fc2act,	n, c, h, w, diffData, fc2.output_d);
-		fullyConnectedBackward(fc2, n, c, h, w, fc2act.del_d, &diffData);
+		fullyConnectedBackward(fc2, n, c, h, w, fc2act.del_d);
 
-		activationBackward(fc1act, 	n, c, h, w, diffData, fc1.output_d);
-		fullyConnectedBackward(fc1, n, c, h, w, fc1act.del_d, &diffData);		
+		activationBackward(fc1act, 	n, c, h, w, fc2.del_d, fc1.output_d);
+		fullyConnectedBackward(fc1, n, c, h, w, fc1act.del_d);		
 
 
-		poolBackward(pool2,			n, c, h, w, diffData, conv2.output_d, conv2.convTensor);
+		poolBackward(pool2,			n, c, h, w, fc1.del_d, conv2.output_d);
 		convoluteBackward(conv2,	n, c, h, w, pool2.del_d);
 
-		poolBackward(pool1,			n, c, h, w, conv2.del_d, conv1.output_d, conv1.convTensor);
+		poolBackward(pool1,			n, c, h, w, conv2.del_d, conv1.output_d);
 
 
 		// Update Weights
