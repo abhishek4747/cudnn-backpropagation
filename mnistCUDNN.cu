@@ -1292,8 +1292,8 @@ class network_t
 		// lrnForward(n, c, h, w, srcData, &dstData);
 
 		fullyConnectedForward(fc2, 	n, c, h, w, fc1act.output_d);
-		activationForward(fc2act, 	n, c, h, w, fc2.output_d);
-		// softmaxForward(fc2act, 	n, c, h, w, fc2.output_d);
+		// activationForward(fc2act, 	n, c, h, w, fc2.output_d);
+		softmaxForward(fc2act, 	n, c, h, w, fc2.output_d);
 
 		const int max_digits = fc2act.outputs;
 		// Take care of half precision
@@ -1335,8 +1335,9 @@ class network_t
 		// getDiffDataSft(fc2act, target, &diffData);
 		
 
-		activationBackward(fc2act,	n, c, h, w, diffData, fc2.output_d);
-		
+		// activationBackward(fc2act,	n, c, h, w, diffData, fc2.output_d);
+		softmaxBackward(fc2act,		n, c, h, w, diffData, fc2.output_d);
+
 		fullyConnectedBackward(fc2, n, c, h, w, fc2act.del_d);
 
 		activationBackward(fc1act, 	n, c, h, w, fc2.del_d, fc1.output_d);
