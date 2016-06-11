@@ -952,37 +952,33 @@ class network_t
 
 	void getDiffDataAct(const Layer_t<value_type>& layer, int target, value_type** diffData){
 		resize(layer.outputs, diffData);
-		value_type *diffData_h = new value_type[layer.outputs];
 		value_type outputh[layer.outputs];
 		checkCudaErrors( cudaMemcpy(outputh, layer.output_d, MSIZE(layer.outputs), cudaMemcpyDeviceToHost) );
 		for (int i=0; i<layer.outputs; i++){
 			if (i==target)
-				diffData_h[i] = 1 - outputh[i];
+				outputh[i] = 1 - outputh[i];
 			else
-				diffData_h[i] = 0 - outputh[i];
+				outputh[i] = 0 - outputh[i];
 		}
-		checkCudaErrors( cudaMemcpy(*diffData, diffData_h, MSIZE(layer.outputs), cudaMemcpyHostToDevice) );
-		delete [] diffData_h;
+		checkCudaErrors( cudaMemcpy(*diffData, outputh, MSIZE(layer.outputs), cudaMemcpyHostToDevice) );
 	}
 
 	void getDiffDataSft(const Layer_t<value_type>& layer, int target, value_type** diffData){
 		resize(layer.outputs, diffData);
-		value_type *diffData_h = new value_type[layer.outputs];
 		value_type outputh[layer.outputs];
 		checkCudaErrors( cudaMemcpy(outputh, layer.output_d, MSIZE(layer.outputs), cudaMemcpyDeviceToHost) );
 		for (int i=0; i<layer.outputs; i++){
 			if (i==target)
-				diffData_h[i] = 1 - outputh[i];
+				outputh[i] = outputh[i] - 1;
 			else
-				diffData_h[i] = 0 - outputh[i];
+				outputh[i] = outputh[i];
 		}
-		checkCudaErrors( cudaMemcpy(*diffData, diffData_h, MSIZE(layer.outputs), cudaMemcpyHostToDevice) );
-		delete [] diffData_h;
+		checkCudaErrors( cudaMemcpy(*diffData, outputh, MSIZE(layer.outputs), cudaMemcpyHostToDevice) );
 	}
 
 	void softmaxBackward(const Layer_t<value_type>& layer, 
 						int &n, int &c, int &h, int &w, 						
-						value_type* diffData)
+						value_type* diffData, value_type* srcData)
 	{
 		// println("softmaxBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		// resize(n*c*h*w, &(layer.output_d));
@@ -1334,9 +1330,13 @@ class network_t
 		n = h = w = 1; c = fc2act.outputs;
 
 		value_type *diffData = NULL;
+		
 		getDiffDataAct(fc2act, target, &diffData);
+		// getDiffDataSft(fc2act, target, &diffData);
+		
 
 		activationBackward(fc2act,	n, c, h, w, diffData, fc2.output_d);
+		
 		fullyConnectedBackward(fc2, n, c, h, w, fc2act.del_d);
 
 		activationBackward(fc1act, 	n, c, h, w, fc2.del_d, fc1.output_d);
@@ -1468,10 +1468,10 @@ void displayUsage()
 double *makeDiffData(int m, int c) {
   double *diff = (double *) calloc(m * c, sizeof(double));
   for (int j = 0; j < m; j++) {
-    int cs = rand() % c;
+    int cs = 4;//rand() % c;
     printf("%d cs: %d\n", j, cs);
     for (int i = 0; i < c; i++)
-      diff[j * c + i] = cs == i ? -c / (double) m : 0;
+      diff[j * c + i] = cs == i ? -1 / (double) m : 0;
   }
   return diff;
 }
@@ -1483,6 +1483,16 @@ void readImageToDevice(const char* fname, value_type **image_data_d){
 	checkCudaErrors( cudaMalloc(&image_data_d, MSIZE(N)) );
 	checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, MSIZE(N), cudaMemcpyHostToDevice) );
 }
+
+void printMatrix(const double *mat, int m, int n) {
+    for (int j = 0; j < n; j++) {
+        for (int i = 0; i < m; i++) {
+            printf("%f ", mat[j * m + i]);
+        }
+        printf("\n");
+    }
+}
+
 
 /******************************************************************************
  * MAIN() function
@@ -1662,6 +1672,96 @@ int main(int argc, char *argv[])
 			println("Testing Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
 			println("Correctly predicted "<<correct<<" examples out of "<<n);
 		}
+	}else{
+		int m = 1, c = 10;
+		double fcLayer[10] = {0.006681, 0.090011, 0.008735, 0.007780, 0.009844, 0.007349, 0.008946, 0.006972, 0.006461, 0.024001 };
+	    // for (int i = 0; i < m; i++) {
+	    //     double def = rand() % 25;
+	    //     for (int c_idx = 0; c_idx < c; c_idx++) {
+	    //         int offset = i * c + c_idx;
+	    //         fcLayer[offset] = rand()%5;
+	    //     }
+	    // }
+	    printf("FC LAYER:\n");
+	    printMatrix(fcLayer, c, m);
+
+	    double *d_fcLayer;
+	    cudaMalloc((void**) &d_fcLayer, m * c * sizeof(double));
+	    cudaMemcpy(d_fcLayer, fcLayer, m * c * sizeof(double), cudaMemcpyHostToDevice);
+
+	    double *d_softmaxData;
+	    cudaMalloc((void**) &d_softmaxData, m * c * sizeof(double));
+
+	    cudnnHandle_t cudnnHandle;
+	    cudnnCreate(&cudnnHandle);
+	    value_type alpha = value_type(1);
+	    value_type beta  = value_type(0);
+
+	    // softmaxForward(n, c, h, w, dstData, &srcData);
+	    cudnnTensorDescriptor_t srcTensorDesc, sftTensorDesc;
+	    cudnnCreateTensorDescriptor(&srcTensorDesc);
+	    cudnnCreateTensorDescriptor(&sftTensorDesc);
+	    cudnnSetTensor4dDescriptor(srcTensorDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_DOUBLE,
+	            m, c, 1, 1);
+	    cudnnSetTensor4dDescriptor(sftTensorDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_DOUBLE,
+	            m, c, 1, 1);
+	    cudnnSoftmaxForward(cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL, &alpha,
+	            srcTensorDesc, d_fcLayer, &beta, sftTensorDesc, d_softmaxData);
+
+	    cudaDeviceSynchronize();
+
+	    // Copy back
+	    double *result = (double *) malloc(m * c * sizeof(double));
+	    cudaMemcpy(result, d_softmaxData, m * c * sizeof(double), cudaMemcpyDeviceToHost);
+	    cudaDeviceSynchronize();
+
+	    // Log
+	    printf("SOFTMAX:\n");
+	    printMatrix(result, c, m);
+
+	    // Try backward
+	    cudnnTensorDescriptor_t diffTensorDesc;
+	    cudnnCreateTensorDescriptor(&diffTensorDesc);
+	    cudnnSetTensor4dDescriptor(diffTensorDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_DOUBLE,
+	                               m, c, 1, 1);
+
+	    double *d_gradData;
+	    cudaMalloc((void**) &d_gradData, m * c * sizeof(double));
+
+	    double *diffData = makeDiffData(m, c);
+	    double *d_diffData;
+	    cudaMalloc((void**) &d_diffData, m * c * sizeof(double));
+	    cudaMemcpy(d_diffData, diffData, m * c * sizeof(double), cudaMemcpyHostToDevice);
+	    cudaDeviceSynchronize();
+
+	    
+	    cudnnSoftmaxBackward(cudnnHandle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL, &alpha,
+	                         srcTensorDesc, d_softmaxData, diffTensorDesc, d_diffData, &beta, sftTensorDesc, d_gradData);
+	    cudaDeviceSynchronize();
+
+	    // Copy back
+	    double *result_backward = (double *) malloc(m * c * sizeof(double));
+	    cudaMemcpy(result_backward, d_gradData, m * c * sizeof(double), cudaMemcpyDeviceToHost);
+	    cudaDeviceSynchronize();
+
+	    // Log
+	    printf("GRADIENT:\n");
+	    printMatrix(result_backward, c, m);
+
+	    // Destruct
+	    free(result);
+	    free(diffData);
+	    free(result_backward);
+	    // free(fcLayer);
+
+	    cudnnDestroyTensorDescriptor(srcTensorDesc);
+	    cudnnDestroyTensorDescriptor(sftTensorDesc);
+	    cudnnDestroyTensorDescriptor(diffTensorDesc);
+	    cudaFree(d_fcLayer);
+	    cudaFree(d_softmaxData);
+	    cudaFree(d_gradData);
+	    cudaFree(d_diffData);
+	    cudnnDestroy(cudnnHandle);
 	}
 
 	// Reset device and exit gracefully
