@@ -264,8 +264,8 @@ struct Layer_t
 
 	value_type *data_h, 	*data_d;
 	value_type *bias_h, 	*bias_d;
-	value_type *output_h, 	*output_d;
-	value_type *del_h, 		*del_d;
+
+	value_type *output_d,	*del_d;
 
 	cudnnConvolutionDescriptor_t convDesc;
 	cudnnTensorDescriptor_t convTensor, convBiasTensor;
@@ -322,8 +322,6 @@ struct Layer_t
 
 		data_h 	= new value_type[w_size];
 		bias_h 	= new value_type[b_size];
-		output_h = new value_type[outputs];
-		del_h 	= new value_type[outputs];
 
 		// Random Initialization
 		// TODO : Fix this random initialization
@@ -331,10 +329,6 @@ struct Layer_t
 			data_h[i] = (((value_type)rand())/(rand()+1))/100000;
 		for (int i=0; i<b_size; i++)
 			bias_h[i] = (((value_type)rand())/(rand()+1))/100000;			
-		for (int i=0; i<outputs; i++){
-			output_h[i]=0;
-			del_h[i]=0;
-		}
 		
 		checkCudaErrors( cudaMalloc(&data_d, 	MSIZE(w_size)) );
 		checkCudaErrors( cudaMalloc(&bias_d, 	MSIZE(b_size)) );
@@ -353,8 +347,6 @@ struct Layer_t
 	{
 		if (data_h != NULL) 	delete [] data_h;
 		if (bias_h != NULL) 	delete [] bias_h;
-		if (output_h != NULL) 	delete [] output_h;
-		if (del_h != NULL) 		delete [] del_h;
 
 		if (data_d != NULL) 	checkCudaErrors( cudaFree(data_d) );
 		if (bias_d != NULL) 	checkCudaErrors( cudaFree(bias_d) );
@@ -376,19 +368,13 @@ struct Layer_t
 
 		data_h 	= new value_type[w_size];
 		bias_h 	= new value_type[b_size];
-		output_h = new value_type[outputs];
-		del_h 	= new value_type[_d_size];
 
 		// Random Initialization
 		// TODO : Fix this random initialization
 		for (int i=0; i<w_size; i++)
 			data_h[i] = (((value_type)rand())/(rand()+1))/100000;
 		for (int i=0; i<b_size; i++)
-			bias_h[i] = (((value_type)rand())/(rand()+1))/100000;			
-		for (int i=0; i<outputs; i++)
-			output_h[i]=0;
-		for (int i=0; i<_d_size; i++)
-			del_h[i]=0;
+			bias_h[i] = (((value_type)rand())/(rand()+1))/100000;
 		
 		
 		checkCudaErrors( cudaMalloc(&data_d, 	MSIZE(w_size)) );
@@ -398,8 +384,6 @@ struct Layer_t
 
 		if (data_h!=NULL) 	checkCudaErrors( cudaMemcpy(data_d, 	data_h, 	MSIZE(w_size), 	cudaMemcpyHostToDevice) );
 		if (bias_h!=NULL) 	checkCudaErrors( cudaMemcpy(bias_d, 	bias_h, 	MSIZE(b_size), 	cudaMemcpyHostToDevice) );
-		if (output_h!=NULL) checkCudaErrors( cudaMemcpy(output_d, 	output_h, 	MSIZE(outputs*out_height*out_width),	cudaMemcpyHostToDevice) );
-		if (del_h!=NULL && _d_size!=0) 	checkCudaErrors( cudaMemcpy(del_d, 		del_h, 		MSIZE(_d_size),	cudaMemcpyHostToDevice) );
 
 		checkCUDNN(cudnnCreateTensorDescriptor(&convTensor));
 		checkCUDNN(cudnnCreateTensorDescriptor(&srcTensorDesc));
@@ -490,19 +474,9 @@ struct Layer_t
 		b_size	= conv.outputs*(conv.out_width / stride) * (conv.out_height / stride);
 		outputs = b_size;
 		inputs  = conv.outputs*conv.out_width*conv.out_height; 
-
-		// output_h = new value_type[outputs];
-		// del_h 	= new value_type[inputs];
-
-		// for (int i=0; i<outputs; i++){
-		// 	output_h[i]=0;
-		// 	del_h[i]=0;
-		// }
 		
 		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs)) );
 		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(inputs)) );
-
-		// copyDataToDevice();
 
 		checkCUDNN(cudnnCreateTensorDescriptor(&poolSrcTensor));
 		checkCUDNN(cudnnCreateTensorDescriptor(&poolDstTensor));
@@ -540,8 +514,6 @@ struct Layer_t
 
 		data_h 	= new value_type[w_size];
 		bias_h 	= new value_type[b_size];
-		output_h = new value_type[outputs];
-		del_h 	= new value_type[inputs];
 
 		// Random Initialization
 		// TODO : Fix this random initialization
@@ -549,10 +521,6 @@ struct Layer_t
 			data_h[i] = (((value_type)rand())/(rand()+1))/100000;
 		for (int i=0; i<b_size; i++)
 			bias_h[i] = (((value_type)rand())/(rand()+1))/100000;			
-		for (int i=0; i<outputs; i++)
-			output_h[i]=0;
-		for (int i=0; i<inputs; i++)
-			del_h[i]=0;
 		
 		
 		checkCudaErrors( cudaMalloc(&data_d, 	MSIZE(w_size)) );
@@ -570,14 +538,6 @@ struct Layer_t
 		kernel_dim 	= 1;
 		w_size 		= inputs*outputs*kernel_dim*kernel_dim;
 		b_size 		= outputs;
-
-		output_h = new value_type[b_size];
-		del_h 	= new value_type[b_size];
-
-		for (int i=0; i<b_size; i++){
-			output_h[i]=0;
-			del_h[i]=0;
-		}
 		
 		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(b_size)) );
 		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(b_size)) );
@@ -1029,12 +989,13 @@ class network_t
 	void getDiffData(const Layer_t<value_type>& layer, int target, value_type** diffData){
 		resize(layer.outputs, diffData);
 		value_type *diffData_h = new value_type[layer.outputs];
-		checkCudaErrors( cudaMemcpy(layer.output_h, layer.output_d, MSIZE(layer.outputs), cudaMemcpyDeviceToHost) );
+		value_type outputh[layer.outputs];
+		checkCudaErrors( cudaMemcpy(outputh, layer.output_d, MSIZE(layer.outputs), cudaMemcpyDeviceToHost) );
 		for (int i=0; i<layer.outputs; i++){
 			if (i==target)
-				diffData_h[i] = 1 - layer.output_h[i];
+				diffData_h[i] = 1 - outputh[i];
 			else
-				diffData_h[i] = 0 - layer.output_h[i];
+				diffData_h[i] = 0 - outputh[i];
 		}
 		checkCudaErrors( cudaMemcpy(*diffData, diffData_h, MSIZE(layer.outputs), cudaMemcpyHostToDevice) );
 		delete [] diffData_h;
