@@ -97,7 +97,7 @@ static void  showDevices( void )
     for (int i=0; i< totalDevices; i++) {
         struct cudaDeviceProp prop;
         checkCudaErrors(cudaGetDeviceProperties( &prop, i ));
-        printf( "device %d : sms %2d  Capabilities %d.%d, SmClock %.1f Mhz, MemSize (Mb) %d, MemClock %.1f Mhz, Ecc=%d, boardGroupID=%d\n",
+        printf( "Device %d : SMs %2d  Capabilities %d.%d, SmClock %.1f Mhz, MemSize (Mb) %d, MemClock %.1f Mhz, Ecc=%d, boardGroupID=%d\n",
                     i, prop.multiProcessorCount, prop.major, prop.minor,
                     (float)prop.clockRate*1e-3,
                     (int)(prop.totalGlobalMem/(1024*1024)),

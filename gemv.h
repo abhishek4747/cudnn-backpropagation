@@ -78,33 +78,4 @@ void gemv(cublasHandle_t cublasHandle, int m, int n, float alpha,
 #endif
 };
 
-#if defined(CUDA_VERSION) && (CUDA_VERSION > 7000)
-
-#if (CUDA_VERSION < 8000)
-#define  CUDA_R_16F CUBLAS_DATA_HALF
-#endif
-void gemv(cublasHandle_t cublasHandle, int m, int n, float alpha, 
-            const half1 *A, const half1 *x,
-                               float beta, half1 *y)
-{
-    checkCublasErrors( cublasSgemmEx  ( cublasHandle, 
-                                      CUBLAS_OP_T,
-                                      CUBLAS_OP_N, 
-                                      n,
-                                      1,
-                                      m,
-                                      &alpha, 
-                                      A,  
-                                      CUDA_R_16F,
-                                      m,
-                                      x,
-                                      CUDA_R_16F,
-                                      m, 
-                                      &beta, 
-                                      y,
-                                      CUDA_R_16F,
-                                      m) );
-};
-#endif
-
 #endif  // _GEMV_H_
