@@ -4,3 +4,4 @@ mnistCUDNN
 *.o
 *.log
 *.bin
+._*.cu

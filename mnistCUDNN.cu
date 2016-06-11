@@ -547,6 +547,7 @@ struct Layer_t
 		std::ifstream myfile(filename.c_str(), std::ios::in | std::ios::binary);
 		if (myfile.is_open()){
 			myfile.read((char*)matrix, MSIZE(size));
+			return true;
 		}else{
 			println("Error reading file "<<filename);
 			return false;
@@ -558,6 +559,7 @@ struct Layer_t
 		std::ofstream myfile(filename.c_str(), std::ios::out | std::ios::binary);
 		if (myfile.is_open()){
 			myfile.write((char*)matrix, MSIZE(size));
+			return true;
 		}else{
 			println("Error saving file "<<filename);
 			return false;
@@ -948,7 +950,22 @@ class network_t
 										  layer.output_d) );
 	}
 
-	void getDiffData(const Layer_t<value_type>& layer, int target, value_type** diffData){
+	void getDiffDataAct(const Layer_t<value_type>& layer, int target, value_type** diffData){
+		resize(layer.outputs, diffData);
+		value_type *diffData_h = new value_type[layer.outputs];
+		value_type outputh[layer.outputs];
+		checkCudaErrors( cudaMemcpy(outputh, layer.output_d, MSIZE(layer.outputs), cudaMemcpyDeviceToHost) );
+		for (int i=0; i<layer.outputs; i++){
+			if (i==target)
+				diffData_h[i] = 1 - outputh[i];
+			else
+				diffData_h[i] = 0 - outputh[i];
+		}
+		checkCudaErrors( cudaMemcpy(*diffData, diffData_h, MSIZE(layer.outputs), cudaMemcpyHostToDevice) );
+		delete [] diffData_h;
+	}
+
+	void getDiffDataSft(const Layer_t<value_type>& layer, int target, value_type** diffData){
 		resize(layer.outputs, diffData);
 		value_type *diffData_h = new value_type[layer.outputs];
 		value_type outputh[layer.outputs];
@@ -1317,7 +1334,7 @@ class network_t
 		n = h = w = 1; c = fc2act.outputs;
 
 		value_type *diffData = NULL;
-		getDiffData(fc2act, target, &diffData);
+		getDiffDataAct(fc2act, target, &diffData);
 
 		activationBackward(fc2act,	n, c, h, w, diffData, fc2.output_d);
 		fullyConnectedBackward(fc2, n, c, h, w, fc2act.del_d);
