@@ -44,8 +44,8 @@ namespace npp
             void
             Copy2D(D *pDst, size_t nDstPitch, const D *pSrc, size_t nSrcPitch, size_t nWidth, size_t nHeight)
             {
-                const void *pSrcLine = pSrc;
-                void        *pDstLine = pDst;
+                //const void *pSrcLine = pSrc;
+                //void        *pDstLine = pDst;
 
                 for (size_t iLine = 0; iLine < nHeight; ++iLine)
                 {
