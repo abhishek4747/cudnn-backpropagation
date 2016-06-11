@@ -562,8 +562,6 @@ struct Layer_t
 
 		if (data_h!=NULL) 	checkCudaErrors( cudaMemcpy(data_d, 	data_h, 	MSIZE(w_size), 	cudaMemcpyHostToDevice) );
 		if (bias_h!=NULL) 	checkCudaErrors( cudaMemcpy(bias_d, 	bias_h, 	MSIZE(b_size), 	cudaMemcpyHostToDevice) );
-		if (output_h!=NULL) checkCudaErrors( cudaMemcpy(output_d, 	output_h, 	MSIZE(b_size),	cudaMemcpyHostToDevice) );
-		if (del_h!=NULL) 	checkCudaErrors( cudaMemcpy(del_d, 		del_h, 		MSIZE(inputs),	cudaMemcpyHostToDevice) );
 	}
 
 	void initLayer(int _outputs){
@@ -605,15 +603,43 @@ struct Layer_t
 	void copyDataToDevice(){
 		if (data_h!=NULL) 	checkCudaErrors( cudaMemcpy(data_d, 	data_h, 	MSIZE(w_size), 	cudaMemcpyHostToDevice) );
 		if (bias_h!=NULL) 	checkCudaErrors( cudaMemcpy(bias_d, 	bias_h, 	MSIZE(b_size), 	cudaMemcpyHostToDevice) );
-		if (output_h!=NULL) checkCudaErrors( cudaMemcpy(output_d, 	output_h, 	MSIZE(b_size),	cudaMemcpyHostToDevice) );
-		if (del_h!=NULL) 	checkCudaErrors( cudaMemcpy(del_d, 		del_h, 		MSIZE(b_size),	cudaMemcpyHostToDevice) );
 	}
 	
 	void copyDataToHost(){
 		if (data_h!=NULL) 	checkCudaErrors( cudaMemcpy(data_h, 	data_d, 	MSIZE(w_size), 	cudaMemcpyDeviceToHost) );
 		if (bias_h!=NULL) 	checkCudaErrors( cudaMemcpy(bias_h, 	bias_d, 	MSIZE(b_size), 	cudaMemcpyDeviceToHost) );
-		if (output_h!=NULL) checkCudaErrors( cudaMemcpy(output_h, 	output_d, 	MSIZE(b_size), 	cudaMemcpyDeviceToHost) );
-		if (del_h!=NULL) 	checkCudaErrors( cudaMemcpy(del_h, 		del_d, 		MSIZE(b_size), 	cudaMemcpyDeviceToHost) );
+	}
+
+	bool load(std::string layername){
+		std::string dtype = (sizeof(value_type)==4?"_float_":"_double_");
+		return loadWeights(layername+dtype+"weights.bin", w_size, data_h) && loadWeights(layername+dtype+"bias.bin", b_size, bias_h);
+	}
+
+	bool save(std::string layername){
+		std::string dtype = (sizeof(value_type)==4?"_float_":"_double_");
+		return saveWeights(layername+dtype+"weights.bin", w_size, data_h) && saveWeights(layername+dtype+"bias.bin", b_size, bias_h);
+	}
+
+	bool loadWeights(std::string filename, size_t size, value_type* matrix){
+		filename = "bins/"+filename;
+		std::ifstream myfile(filename.c_str(), std::ios::in | std::ios::binary);
+		if (myfile.is_open()){
+			myfile.read((char*)matrix, MSIZE(size));
+		}else{
+			println("Error reading file "<<filename);
+			return false;
+		}
+	}
+
+	bool saveWeights(std::string filename, size_t size, value_type* matrix){
+		filename = "bins/"+filename;
+		std::ofstream myfile(filename.c_str(), std::ios::out | std::ios::binary);
+		if (myfile.is_open()){
+			myfile.write((char*)matrix, MSIZE(size));
+		}else{
+			println("Error saving file "<<filename);
+			return false;
+		}
 	}
 private:
 	void readAllocInit(const char* fname, int size, value_type** data_h, value_type** data_d)
@@ -1393,47 +1419,6 @@ class network_t
 		checkCudaErrors( cudaFree(diffData) );
 		return id;
 	}
-	
-	void getBackPropData(const Layer_t<value_type>& layer, const Layer_t<value_type>& next_layer, value_type target, 
-		value_type* dstDiffData, value_type** targetData, value_type** srcDiffData, 
-			bool last_layer)
-	{
-		const int max_digits = layer.outputs;
-		value_type srcData[max_digits];
-		checkCudaErrors( cudaMemcpy(srcData, layer.output_d, MSIZE(max_digits), cudaMemcpyDeviceToHost) );
-		resize(max_digits, srcDiffData);
-		resize(max_digits, targetData);
-		if (last_layer){
-			// resize(max_digits, &dstDiffData);
-			value_type srcDiffData_h[max_digits];
-			value_type targetData_h[max_digits];
-
-			for (int i = 0; i<max_digits; i++){
-				targetData_h[i] = i==target?1:0;
-				srcDiffData_h[i] = targetData_h[i]-srcData[i];
-			}
-
-			//checkCudaErrors( cudaMalloc(&srcDiffData, MSIZE(max_digits)) );
-			checkCudaErrors( cudaMemcpy(*srcDiffData, srcDiffData_h, MSIZE(max_digits),cudaMemcpyHostToDevice) );
-			//checkCudaErrors( cudaMalloc(&targetData, MSIZE(max_digits)) );
-			checkCudaErrors( cudaMemcpy(*targetData, targetData_h, MSIZE(max_digits),cudaMemcpyHostToDevice) );
-		
-		}else{
-			//THEORY: del_W1 = (del_W2*W2')*hidden_output*(1-hidden_output)
-			value_type alpha = value_type(1), beta = value_type(0);
-			if (DEBUG) printDeviceVector("\tW2: \n", next_layer.inputs*next_layer.outputs, next_layer.data_d);
-			checkCudaErrors( CUBLAS_GEMV(cublasHandle, CUBLAS_OP_N,
-									  next_layer.inputs, next_layer.outputs,
-									  &alpha,
-									  next_layer.data_d, next_layer.inputs,
-									  dstDiffData, 1,
-									  &beta,
-									  *srcDiffData, 1) );
-		}
-		if (DEBUG) printDeviceVector("\tdstDiffData: \n", max_digits, dstDiffData);
-		if (DEBUG) printDeviceVector("\ttargetData: \n", max_digits, *targetData);
-		if (DEBUG) printDeviceVector("\tsrcDiffData: \n", max_digits, *srcDiffData);
-	}
 
 	static void load_mnist_data(value_type **training_data, value_type **testing_data,
 		 value_type **training_target, value_type **testing_target,
@@ -1540,28 +1525,6 @@ void displayUsage()
 	// printf( "image=<name>           : classify specific image\n");
 }
 
-template <typename value_type>
-bool loadWeights(std::string filename, size_t size, value_type* matrix){
-	std::ifstream myfile(filename.c_str(), std::ios::in | std::ios::binary);
-	if (myfile.is_open()){
-		myfile.read((char*)matrix, MSIZE(size));
-	}else{
-		println("Error reading file "<<filename);
-		return false;
-	}
-}
-
-template <typename value_type>
-bool saveWeights(std::string filename, size_t size, value_type* matrix){
-	std::ofstream myfile(filename.c_str(), std::ios::out | std::ios::binary);
-	if (myfile.is_open()){
-		myfile.write((char*)matrix, MSIZE(size));
-	}else{
-		println("Error saving file "<<filename);
-		return false;
-	}
-}
-
 double *makeDiffData(int m, int c) {
   double *diff = (double *) calloc(m * c, sizeof(double));
   for (int j = 0; j < m; j++) {
@@ -1639,7 +1602,7 @@ int main(int argc, char *argv[])
 
 		int total_train_data, total_test_data;
 		alexnet.load_mnist_data(&temp_training_data, &testing_data, &temp_training_target, &testing_target, total_train_data, total_test_data);
-		println("\n\nData Loaded. Training examples:"<<total_train_data/N<<" Testing examples:"<<total_test_data/N);
+		println("\n\nData Loaded. Training examples:"<<total_train_data/N<<" Testing examples:"<<total_test_data/N<<" Data dimension:"<<N);
 	
 		// Shuffle training data
 		int m = total_train_data/N;
@@ -1664,10 +1627,12 @@ int main(int argc, char *argv[])
 		delete [] perm;
 	
 		// Try to load learned weights from file other wise start learning phase
-		if (false)
+		if (conv1.load("conv1") && conv2.load("conv2") && fc1.load("fc1") && fc2.load("fc2"))
 		{
-			// input.copyDataToDevice();
-			// hidden.copyDataToDevice();
+			conv1.copyDataToDevice();
+			conv2.copyDataToDevice();
+			fc1.copyDataToDevice();
+			fc2.copyDataToDevice();
 			println("Weights from file loaded");
 		}
 		else{
@@ -1706,13 +1671,14 @@ int main(int argc, char *argv[])
 			println("\n **** Learning completed ****");
 			println("Learning Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
 			
-			// input.copyDataToHost();
-			// hidden.copyDataToHost();
+			
+			conv1.copyDataToHost();
+			conv2.copyDataToHost();
+			fc1.copyDataToHost();
+			fc2.copyDataToHost();
 			// Save the weights in a binary file
-			// saveWeights("input_data.bin", input.inputs*input.outputs, input.data_h);
-			// saveWeights("input_bias.bin", input.outputs, input.bias_h);
-			// saveWeights("hidden_data.bin", hidden.inputs*hidden.outputs, hidden.data_h);
-			// saveWeights("hidden_bias.bin", hidden.outputs, hidden.bias_h);
+			if (conv1.save("conv1") && conv2.save("conv2") && fc1.save("fc1") && fc2.save("fc2"))
+				println("Weights Saved.");
 		}
 	
 		// Testing Phase
