@@ -192,7 +192,7 @@ else
 	@echo "Sample is ready - all dependencies have been met"
 endif
 
-OBJ = fp16_dev.o fp16_emu.o mnistCUDNN.o
+OBJ = mnistCUDNN.o
 
 mnistCUDNN: $(OBJ)
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(LIBRARIES)

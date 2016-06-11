@@ -32,9 +32,9 @@
 
 #include <cuda.h> // need CUDA_VERSION
 #include <cudnn.h>
+#include <cublas_v2.h>
 
 #include "ImageIO.h"
-#include "gemv.h"
 #include "error_util.h"
 
 /******************************************************************************
@@ -127,7 +127,7 @@ void printDeviceVector(std::string str, int size, value_type* vec_d)
 	value_type *vec;
 	vec = new value_type[size];
 	cudaDeviceSynchronize();
-	cudaMemcpy(vec, vec_d, size*sizeof(value_type), cudaMemcpyDeviceToHost);
+	cudaMemcpy(vec, vec_d, MSIZE(size), cudaMemcpyDeviceToHost);
 	printHostVector(str, size, vec);
 	delete [] vec;
 }
@@ -181,7 +181,7 @@ void readAllocMemcpy(const char* fname, int size, value_type** data_h, value_typ
 
 	readBinaryFile<value_type>(fname, size, *data_h);
 
-	int size_b = size*sizeof(value_type);
+	int size_b = MSIZE(size);
 	checkCudaErrors( cudaMalloc(data_d, size_b) );
 	checkCudaErrors( cudaMemcpy(*data_d, *data_h,
 								size_b,
@@ -224,7 +224,7 @@ void printDeviceVector(int size, value_type* vec_d)
 	value_type *vec;
 	vec = new value_type[size];
 	cudaDeviceSynchronize();
-	cudaMemcpy(vec, vec_d, size*sizeof(value_type), cudaMemcpyDeviceToHost);
+	cudaMemcpy(vec, vec_d, MSIZE(size), cudaMemcpyDeviceToHost);
 	Convert<real_type> toReal;
 	std::cout.precision(5);
 	std::cout.setf( std::ios::fixed, std::ios::floatfield );
@@ -738,7 +738,7 @@ class network_t
 		{
 			checkCudaErrors( cudaFree(*data) );
 		}
-		checkCudaErrors( cudaMalloc(data, size*sizeof(value_type)) );
+		checkCudaErrors( cudaMalloc(data, MSIZE(size)) );
 	}
 	
 	void setConvolutionAlgorithm(const cudnnConvolutionFwdAlgo_t& algo)
@@ -774,10 +774,17 @@ class network_t
 
 		scaling_type alpha = scaling_type(1), beta = scaling_type(1);
 		// place bias into dstData
-		checkCudaErrors( cudaMemcpy(*dstData, ip.bias_d, dim_y*sizeof(value_type), cudaMemcpyDeviceToDevice) );
+		checkCudaErrors( cudaMemcpy(*dstData, ip.bias_d, MSIZE(dim_y), cudaMemcpyDeviceToDevice) );
 		
-		gemv(cublasHandle, dim_x, dim_y, alpha,
-				ip.data_d, srcData, beta,*dstData);
+		// gemv(cublasHandle, dim_x, dim_y, alpha,
+		// 		ip.data_d, srcData, beta,*dstData);
+		checkCublasErrors( CUBLAS_GEMV(cublasHandle, CUBLAS_OP_T,
+                                  dim_x, dim_y,
+                                  &alpha,
+                                  ip.data_d, dim_x,
+                                  srcData, 1,
+                                  &beta,
+                                  *dstData, 1) );   
 
 		h = 1; w = 1; c = dim_y;
 	}
@@ -799,8 +806,15 @@ class network_t
 		// place bias into dstData
 		checkCudaErrors( cudaMemcpy(layer.output_d, layer.bias_d, MSIZE(dim_y), cudaMemcpyDeviceToDevice) );
 		
-		gemv(cublasHandle, dim_x, dim_y, alpha,
-				layer.data_d, srcData, beta, layer.output_d);
+		// gemv(cublasHandle, dim_x, dim_y, alpha,
+		// 		layer.data_d, srcData, beta, layer.output_d);
+		checkCublasErrors( CUBLAS_GEMV(cublasHandle, CUBLAS_OP_T,
+                                  dim_x, dim_y,
+                                  &alpha,
+                                  layer.data_d, dim_x,
+                                  srcData, 1,
+                                  &beta,
+                                  layer.output_d, 1) );    
 
 		h = 1; w = 1; c = dim_y;
 	}
@@ -1370,7 +1384,7 @@ class network_t
 		resize(dim_x*dim_y, &dstData);
 
 		value_type alpha = value_type(1), beta = value_type(0);
-		// checkCudaErrors( cudaMemcpy(*dstData, ip.bias_d, ip.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
+		// checkCudaErrors( cudaMemcpy(*dstData, ip.bias_d, MSIZE(ip.outputs), cudaMemcpyDeviceToDevice) );
 		//if (DEBUG) printDeviceVector("last_input: \n", current_layer.inputs, last_input);
 		//if (DEBUG) printDeviceVector("del_W: \n", current_layer.outputs, current_layer.del_d);
 		
@@ -1544,7 +1558,7 @@ class network_t
 		resize(dim_x*dim_y, &dstData);
 
 		value_type alpha = value_type(1), beta = value_type(0);
-		// checkCudaErrors( cudaMemcpy(*dstData, ip.bias_d, ip.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
+		// checkCudaErrors( cudaMemcpy(*dstData, ip.bias_d, MSIZE(ip.outputs), cudaMemcpyDeviceToDevice) );
 		//if (DEBUG) printDeviceVector("last_input: \n", layer.inputs, last_input);
 		//if (DEBUG) printDeviceVector("del_W: \n", layer.outputs, layer.del_d);
 		
@@ -1675,9 +1689,9 @@ class network_t
 
 		if (DEBUG) println("Performing forward propagation ...");
 
-		checkCudaErrors( cudaMalloc(&srcData, N*sizeof(value_type)) );
+		checkCudaErrors( cudaMalloc(&srcData, MSIZE(N)) );
 		checkCudaErrors( cudaMemcpy(srcData, imgData_h,
-									N*sizeof(value_type),
+									MSIZE(N),
 									cudaMemcpyHostToDevice) );
 
 		n = c = 1; h = IMAGE_H; w = IMAGE_W;
@@ -1698,7 +1712,7 @@ class network_t
 		// Take care of half precision
 		Convert<scaling_type> toReal;
 		value_type result[max_digits];
-		checkCudaErrors( cudaMemcpy(result, dstData, max_digits*sizeof(value_type), cudaMemcpyDeviceToHost) );
+		checkCudaErrors( cudaMemcpy(result, dstData, MSIZE(max_digits), cudaMemcpyDeviceToHost) );
 		int id = 0;
 		for (int i = 1; i < max_digits; i++)
 		{
@@ -1835,7 +1849,7 @@ class network_t
 			#endif
 		}
 		resize(N, &image_data_d);
-		checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, N*sizeof(value_type), cudaMemcpyHostToDevice) );
+		checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, MSIZE(N), cudaMemcpyHostToDevice) );
 		int id = predictExampleDevice(image_data_d, target, input, hidden);
 		checkCudaErrors( cudaFree(image_data_d) );
 		return id;
@@ -1847,9 +1861,9 @@ class network_t
 		if (DEBUG) println("\nTarget: "<<target);
 
 		// Setup Variables for forward propagation
-		//checkCudaErrors( cudaMalloc(&srcData, N*sizeof(value_type)) ); 
+		//checkCudaErrors( cudaMalloc(&srcData, MSIZE(N)) ); 
 		resize(N, &srcData);
-		checkCudaErrors( cudaMemcpy(srcData, image_data_d,  N*sizeof(value_type), cudaMemcpyDeviceToDevice) );
+		checkCudaErrors( cudaMemcpy(srcData, image_data_d,  MSIZE(N), cudaMemcpyDeviceToDevice) );
 		n = c = 1; h = IMAGE_H; w = IMAGE_W;
 		// Perform Forward propagation
 		if (DEBUG) println("Performing forward propagation ...");
@@ -1858,19 +1872,19 @@ class network_t
 		fullyConnectedForward(input, n, c, h, w, srcData, &dstData);
 		if (DEBUG) printDeviceVector("fullyConnectedforward: \n", input.outputs, dstData);
 		activationForward(n, c, h, w, dstData, &srcData);
-		checkCudaErrors( cudaMemcpy(input.output_d, srcData, input.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
+		checkCudaErrors( cudaMemcpy(input.output_d, srcData, MSIZE(input.outputs), cudaMemcpyDeviceToDevice) );
 		if (DEBUG) printDeviceVector("Hidden layer outputs: \n", n*c*h*w, input.output_d);
 
 		fullyConnectedForward(hidden, n, c, h, w, srcData, &dstData);
 		if (DEBUG) printDeviceVector("fullyConnectedforward: \n", hidden.outputs, dstData);
 		activationForward(n, c, h, w, dstData, &srcData);
-		checkCudaErrors( cudaMemcpy(hidden.output_d, srcData, hidden.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
+		checkCudaErrors( cudaMemcpy(hidden.output_d, srcData, MSIZE(hidden.outputs), cudaMemcpyDeviceToDevice) );
 		if (DEBUG) printDeviceVector("Output layer outputs: \n", n*c*h*w, hidden.output_d);
 		
 		// Setup Variables for backward propagation
 		const int max_digits = hidden.outputs; //n*c*h*w; //10;
 		value_type result[max_digits];
-		checkCudaErrors( cudaMemcpy(result, srcData, max_digits*sizeof(value_type), cudaMemcpyDeviceToHost) );
+		checkCudaErrors( cudaMemcpy(result, srcData, MSIZE(max_digits), cudaMemcpyDeviceToHost) );
 		int id = 0;
 		for (int i = 1; i < max_digits; i++){
 			if (result[id] < result[i]) 
@@ -1900,7 +1914,7 @@ class network_t
 			#endif
 		}
 		resize(N, &image_data_d);
-		checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, N*sizeof(value_type), cudaMemcpyHostToDevice) );
+		checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, MSIZE(N), cudaMemcpyHostToDevice) );
 		// int id = predictExampleDevice(image_data_d, target, input, hidden);
 		int id = predict_example(image_data_d, input, input, input, input, input, input, hidden, hidden);
 		if (DEBUG) println("Prediction: "<<id);
@@ -1917,7 +1931,7 @@ class network_t
 		//THEORY: delW2 = (target-output)*output*(1-output)
 		//				= srcDiffData * hidden.output_d * (1-hidden.output_d)
 		activationBackward(n, c, h, w, hidden.output_d, targetData, srcDiffData, &dstDiffData);
-		checkCudaErrors( cudaMemcpy(hidden.del_d, dstDiffData, hidden.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
+		checkCudaErrors( cudaMemcpy(hidden.del_d, dstDiffData, MSIZE(hidden.outputs), cudaMemcpyDeviceToDevice) );
 		if (DEBUG) printDeviceVector("delW2: \n", hidden.outputs, hidden.del_d);
 
 		c = input.outputs;
@@ -1927,7 +1941,7 @@ class network_t
 		//				 = del_weights * derivativeof(inputs)
 		if (DEBUG) printDeviceVector("\thidden_output: \n", input.outputs, input.output_d);
 		activationBackward(n, c, h, w, input.output_d, targetData, srcDiffData, &dstDiffData); 
-		checkCudaErrors( cudaMemcpy(input.del_d, dstDiffData, input.outputs*sizeof(value_type), cudaMemcpyDeviceToDevice) );
+		checkCudaErrors( cudaMemcpy(input.del_d, dstDiffData, MSIZE(input.outputs), cudaMemcpyDeviceToDevice) );
 		if (DEBUG) printDeviceVector("delW1: \n", input.outputs, input.del_d);
 
 
@@ -1948,7 +1962,7 @@ class network_t
 	{
 		const int max_digits = layer.outputs;
 		value_type srcData[max_digits];
-		checkCudaErrors( cudaMemcpy(srcData, layer.output_d, max_digits*sizeof(value_type), cudaMemcpyDeviceToHost) );
+		checkCudaErrors( cudaMemcpy(srcData, layer.output_d, MSIZE(max_digits), cudaMemcpyDeviceToHost) );
 		resize(max_digits, srcDiffData);
 		resize(max_digits, targetData);
 		if (last_layer){
@@ -1961,10 +1975,10 @@ class network_t
 				srcDiffData_h[i] = targetData_h[i]-srcData[i];
 			}
 
-			//checkCudaErrors( cudaMalloc(&srcDiffData, max_digits*sizeof(value_type)) );
-			checkCudaErrors( cudaMemcpy(*srcDiffData, srcDiffData_h, max_digits*sizeof(value_type),cudaMemcpyHostToDevice) );
-			//checkCudaErrors( cudaMalloc(&targetData, max_digits*sizeof(value_type)) );
-			checkCudaErrors( cudaMemcpy(*targetData, targetData_h, max_digits*sizeof(value_type),cudaMemcpyHostToDevice) );
+			//checkCudaErrors( cudaMalloc(&srcDiffData, MSIZE(max_digits)) );
+			checkCudaErrors( cudaMemcpy(*srcDiffData, srcDiffData_h, MSIZE(max_digits),cudaMemcpyHostToDevice) );
+			//checkCudaErrors( cudaMalloc(&targetData, MSIZE(max_digits)) );
+			checkCudaErrors( cudaMemcpy(*targetData, targetData_h, MSIZE(max_digits),cudaMemcpyHostToDevice) );
 		
 		}else{
 			//THEORY: del_W1 = (del_W2*W2')*hidden_output*(1-hidden_output)
@@ -1983,7 +1997,7 @@ class network_t
 		if (DEBUG) printDeviceVector("\tsrcDiffData: \n", max_digits, *srcDiffData);
 	}
 
-	static void loadData(value_type **training_data, value_type **testing_data,
+	static void load_mnist_data(value_type **training_data, value_type **testing_data,
 		 value_type **training_target, value_type **testing_target,
 		 int &total_train_size, int &total_test_size)
 	{
@@ -2089,10 +2103,10 @@ void displayUsage()
 }
 
 template <typename value_type>
-bool loadWeights(const char* filename, size_t size, value_type* matrix){
-	std::ifstream myfile(filename, std::ios::in | std::ios::binary);
+bool loadWeights(std::string filename, size_t size, value_type* matrix){
+	std::ifstream myfile(filename.c_str(), std::ios::in | std::ios::binary);
 	if (myfile.is_open()){
-		myfile.read((char*)matrix, size*sizeof(value_type));
+		myfile.read((char*)matrix, MSIZE(size));
 	}else{
 		println("Error reading file "<<filename);
 		return false;
@@ -2100,24 +2114,14 @@ bool loadWeights(const char* filename, size_t size, value_type* matrix){
 }
 
 template <typename value_type>
-bool saveWeights(const char* filename, size_t size, value_type* matrix){
-	std::ofstream myfile(filename, std::ios::out | std::ios::binary);
+bool saveWeights(std::string filename, size_t size, value_type* matrix){
+	std::ofstream myfile(filename.c_str(), std::ios::out | std::ios::binary);
 	if (myfile.is_open()){
-		myfile.write((char*)matrix, size*sizeof(value_type));
+		myfile.write((char*)matrix, MSIZE(size));
 	}else{
 		println("Error saving file "<<filename);
 		return false;
 	}
-}
-
-template <typename value_type> 
-void printMatrix(const value_type *mat, int m, int n) {
-    for (int j = 0; j < n; j++) {
-        for (int i = 0; i < m; i++) {
-            printf("%f ", mat[j * m + i]);
-        }
-        printf("\n");
-    }
 }
 
 double *makeDiffData(int m, int c) {
@@ -2128,7 +2132,6 @@ double *makeDiffData(int m, int c) {
     for (int i = 0; i < c; i++)
       diff[j * c + i] = cs == i ? -c / (double) m : 0;
   }
-
   return diff;
 }
 
@@ -2197,7 +2200,7 @@ int main(int argc, char *argv[])
 		value_type *temp_training_target;
 
 		int total_train_data, total_test_data;
-		alexnet.loadData(&temp_training_data, &testing_data, &temp_training_target, &testing_target, total_train_data, total_test_data);
+		alexnet.load_mnist_data(&temp_training_data, &testing_data, &temp_training_target, &testing_target, total_train_data, total_test_data);
 		println("\n\nData Loaded. Training examples:"<<total_train_data/N<<" Testing examples:"<<total_test_data/N);
 	
 		// Shuffle training data
