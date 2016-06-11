@@ -103,6 +103,12 @@
 #define EXIT_WAIVED 0
 
 /******************************************************************************
+ * CONSTANTS
+ *****************************************************************************/
+
+const std::string weights_folder = "bins/";
+
+/******************************************************************************
  * HELPER FUNCTIONS for classes
  *****************************************************************************/
 
@@ -256,6 +262,8 @@ template <class value_type>
 struct Layer_t
 {
 	LayerType layerType;
+	std::string layername;
+
 	int inputs, outputs, kernel_dim; // linear dimension (i.e. size is kernel_dim * kernel_dim)
 	int  w_size, b_size;
 
@@ -293,56 +301,6 @@ struct Layer_t
 		tensorFormat = CUDNN_TENSOR_NCHW;
 	};
 
-	Layer_t(int _inputs, int _outputs, int _kernel_dim, const char* fname_weights,
-			const char* fname_bias, const char* pname = NULL)
-				  : inputs(_inputs), outputs(_outputs), kernel_dim(_kernel_dim)
-	{
-		std::string weights_path, bias_path;
-		if (pname != NULL)
-		{
-			get_path(weights_path, fname_weights, pname);
-			get_path(bias_path, fname_bias, pname);
-		}
-		else
-		{
-			weights_path = fname_weights; bias_path = fname_bias;
-		}
-		readAllocInit(weights_path.c_str(), inputs * outputs * kernel_dim * kernel_dim, 
-						&data_h, &data_d);
-		readAllocInit(bias_path.c_str(), outputs, &bias_h, &bias_d);
-	}
-
-	// Initialize Empty Layers
-	Layer_t(int _inputs, int _outputs){
-		inputs 	= _inputs;
-		outputs = _outputs; 
-		kernel_dim = 1;
-		w_size = inputs*outputs*kernel_dim*kernel_dim;
-		b_size = outputs;
-
-		data_h 	= new value_type[w_size];
-		bias_h 	= new value_type[b_size];
-
-		// Random Initialization
-		// TODO : Fix this random initialization
-		for (int i=0; i<w_size; i++)
-			data_h[i] = (((value_type)rand())/(rand()+1))/100000;
-		for (int i=0; i<b_size; i++)
-			bias_h[i] = (((value_type)rand())/(rand()+1))/100000;			
-		
-		checkCudaErrors( cudaMalloc(&data_d, 	MSIZE(w_size)) );
-		checkCudaErrors( cudaMalloc(&bias_d, 	MSIZE(b_size)) );
-		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs)) );
-		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(outputs)) );
-
-		copyDataToDevice();
-
-		if (DEBUG){
-			printHostVector("Weights:\n",	w_size, data_h);
-			printHostVector("Bias:\n",		b_size, bias_h);
-		}
-	};
-
 	~Layer_t()
 	{
 		if (data_h != NULL) 	delete [] data_h;
@@ -354,15 +312,17 @@ struct Layer_t
 		if (del_d != NULL) 		checkCudaErrors( cudaFree(del_d) );
 	}
 
-	size_t initConvLayer(int _inputs, int _outputs, int _kernel_dim, int _in_height, int _in_width, int _d_size=0)
+	size_t initConvLayer(std::string _layername, int _inputs, int _outputs, int _kernel_dim, int _in_height, int _in_width, int _d_size=0)
 	{
+		layerType 	= CONV_LAYER;
+		layername 	= _layername;
 		inputs 		= _inputs;
 		outputs 	= _outputs;
 		kernel_dim 	= _kernel_dim;
 		in_width 	= _in_width;
 		in_height 	= _in_height;
-		out_width 	= in_width - kernel_dim + 1;
-		out_height 	= in_height - kernel_dim + 1;
+		out_width 	= in_width - kernel_dim + 1;			// Stride is 1	// TODO: Make Generic
+		out_height 	= in_height - kernel_dim + 1;			// Stride is 1	// TODO: Make Generic
 		w_size 		= inputs*outputs*kernel_dim*kernel_dim;
 		b_size 		= outputs;
 
@@ -382,8 +342,7 @@ struct Layer_t
 		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs*out_height*out_width)) );
 		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(_d_size)) );
 
-		if (data_h!=NULL) 	checkCudaErrors( cudaMemcpy(data_d, 	data_h, 	MSIZE(w_size), 	cudaMemcpyHostToDevice) );
-		if (bias_h!=NULL) 	checkCudaErrors( cudaMemcpy(bias_d, 	bias_h, 	MSIZE(b_size), 	cudaMemcpyHostToDevice) );
+		copyDataToDevice();
 
 		checkCUDNN(cudnnCreateTensorDescriptor(&convTensor));
 		checkCUDNN(cudnnCreateTensorDescriptor(&srcTensorDesc));
@@ -400,20 +359,20 @@ struct Layer_t
 		int w = in_width;
 
         checkCUDNN(cudnnSetTensor4dDescriptor(srcTensorDesc,
-                                              CUDNN_TENSOR_NCHW,
-                                              CUDNN_DATA_DOUBLE,
+                                              tensorFormat,
+                                              dataType,
                                               n, c,
                                               h, w));
 
         checkCUDNN(cudnnSetTensor4dDescriptor(convBiasTensor,
-                                              CUDNN_TENSOR_NCHW,
-                                              CUDNN_DATA_DOUBLE,
+                                              tensorFormat,
+                                              dataType,
                                               1, outputs,
                                               1, 1));
 
         checkCUDNN(cudnnSetFilter4dDescriptor(convFilterDesc,
-                                              CUDNN_DATA_DOUBLE,
-                                              CUDNN_TENSOR_NCHW,
+                                              dataType,
+                                              tensorFormat,
                                               outputs,
                                               inputs, 
 											  kernel_dim,
@@ -431,15 +390,15 @@ struct Layer_t
                                                          &n, &c, &h, &w));
 		
 		checkCUDNN(cudnnSetTensor4dDescriptor(convTensor,
-                                              CUDNN_TENSOR_NCHW,
-                                              CUDNN_DATA_DOUBLE,	// TODO
+                                              tensorFormat,
+                                              dataType,
                                               n, c,
                                               h, w));
 
 
         checkCUDNN(cudnnSetTensor4dDescriptor(dstTensorDesc,
-                                              CUDNN_TENSOR_NCHW,
-                                              CUDNN_DATA_DOUBLE,	// TODO
+                                              tensorFormat,
+                                              dataType,
                                               n, c,
                                               h, w));
         cudnnHandle_t cudnnHandle;
@@ -466,14 +425,16 @@ struct Layer_t
 		return sizeInBytes;
 	}
 
-	void initPoolLayer(int _size, int _stride, const Layer_t<value_type>& conv)
+	void initPoolLayer(std::string _layername, int _size, int _stride, const Layer_t<value_type>& conv)
 	{
-		size 	= _size;
-		stride 	= _stride;
-		w_size	= 0;
-		b_size	= conv.outputs*(conv.out_width / stride) * (conv.out_height / stride);
-		outputs = b_size;
-		inputs  = conv.outputs*conv.out_width*conv.out_height; 
+		layerType 	= POOL_LAYER;
+		layername 	= _layername;
+		size 		= _size;
+		stride 		= _stride;
+		w_size		= 0;
+		b_size		= conv.outputs*(conv.out_width / stride) * (conv.out_height / stride);
+		outputs 	= b_size;
+		inputs  	= conv.outputs*conv.out_width*conv.out_height; 
 		
 		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs)) );
 		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(inputs)) );
@@ -483,16 +444,16 @@ struct Layer_t
 		checkCUDNN(cudnnCreatePoolingDescriptor(&poolDesc));
 
 		// checkCUDNN(cudnnSetTensor4dDescriptor(poolSrcTensor,
-  //                                             CUDNN_TENSOR_NCHW,
-  //                                             CUDNN_DATA_DOUBLE,
+  //                                             tensorFormat,
+  //                                             dataType,
   //                                             1, conv.outputs,
   //                                             conv.out_height / stride,
 		// 									  conv.out_width / stride));
 
 
 		// checkCUDNN(cudnnSetTensor4dDescriptor(poolDstTensor,
-  //                                             CUDNN_TENSOR_NCHW,
-  //                                             CUDNN_DATA_DOUBLE,
+  //                                             tensorFormat,
+  //                                             dataType,
   //                                             1, conv.outputs,
   //                                             conv.out_height / stride,
 		// 									  conv.out_width / stride));
@@ -505,7 +466,9 @@ struct Layer_t
 											   stride, stride));
 	}
 
-	void initFCLayer(int _inputs, int _outputs){
+	void initFCLayer(std::string _layername, int _inputs, int _outputs){
+		layerType 	= FC_LAYER;
+		layername 	= _layername;
 		inputs 		= _inputs;
 		outputs 	= _outputs;
 		kernel_dim 	= 1;
@@ -528,21 +491,20 @@ struct Layer_t
 		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs)) );
 		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(inputs)) );
 
-		if (data_h!=NULL) 	checkCudaErrors( cudaMemcpy(data_d, 	data_h, 	MSIZE(w_size), 	cudaMemcpyHostToDevice) );
-		if (bias_h!=NULL) 	checkCudaErrors( cudaMemcpy(bias_d, 	bias_h, 	MSIZE(b_size), 	cudaMemcpyHostToDevice) );
+		copyDataToDevice();
 	}
 
-	void initLayer(int _outputs){
+	void initLayer(std::string _layername, LayerType _layerType, int _outputs){
+		layerType 	= _layerType;
+		layername 	= _layername;
 		inputs 		= _outputs;
 		outputs 	= _outputs;
 		kernel_dim 	= 1;
-		w_size 		= inputs*outputs*kernel_dim*kernel_dim;
-		b_size 		= outputs;
+		w_size 		= 0;
+		b_size 		= 0;
 		
-		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(b_size)) );
-		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(b_size)) );
-
-		copyDataToDevice();
+		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs)) );
+		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(inputs)) );
 	}
 
 	void destroyConvLayer(){
@@ -570,18 +532,18 @@ struct Layer_t
 		if (bias_h!=NULL) 	checkCudaErrors( cudaMemcpy(bias_h, 	bias_d, 	MSIZE(b_size), 	cudaMemcpyDeviceToHost) );
 	}
 
-	bool load(std::string layername){
+	bool load(){
 		std::string dtype = (sizeof(value_type)==4?"_float_":"_double_");
 		return loadWeights(layername+dtype+"weights.bin", w_size, data_h) && loadWeights(layername+dtype+"bias.bin", b_size, bias_h);
 	}
 
-	bool save(std::string layername){
+	bool save(){
 		std::string dtype = (sizeof(value_type)==4?"_float_":"_double_");
 		return saveWeights(layername+dtype+"weights.bin", w_size, data_h) && saveWeights(layername+dtype+"bias.bin", b_size, bias_h);
 	}
 
 	bool loadWeights(std::string filename, size_t size, value_type* matrix){
-		filename = "bins/"+filename;
+		filename = weights_folder+filename;
 		std::ifstream myfile(filename.c_str(), std::ios::in | std::ios::binary);
 		if (myfile.is_open()){
 			myfile.read((char*)matrix, MSIZE(size));
@@ -592,7 +554,7 @@ struct Layer_t
 	}
 
 	bool saveWeights(std::string filename, size_t size, value_type* matrix){
-		filename = "bins/"+filename;
+		filename = weights_folder+filename;
 		std::ofstream myfile(filename.c_str(), std::ios::out | std::ios::binary);
 		if (myfile.is_open()){
 			myfile.write((char*)matrix, MSIZE(size));
@@ -794,7 +756,7 @@ class network_t
 									   
 		checkCUDNN( cudnnSetFilterNdDescriptor(filterDesc,
 											  dataType,
-											  CUDNN_TENSOR_NCHW,
+											  tensorFormat,
 											  tensorDims,
 											  filterDimA) );
  
@@ -1544,14 +1506,19 @@ int main(int argc, char *argv[])
 	{
 		// Define and initialize network
 		network_t<value_type> alexnet;
-		Layer_t<value_type> conv1; 	conv1.initConvLayer(1, 20, 5, IMAGE_H, IMAGE_W);
-		Layer_t<value_type> pool1; 	pool1.initPoolLayer(2, 2, conv1);
-		Layer_t<value_type> conv2; 	conv2.initConvLayer(conv1.outputs, 50, 5, conv1.out_width / pool1.stride, conv1.out_height / pool1.stride, conv1.outputs * (conv1.out_height / pool1.stride) * (conv1.out_width / pool1.stride));
-		Layer_t<value_type> pool2; 	pool2.initPoolLayer(2, 2, conv2);
-		Layer_t<value_type> fc1;	fc1.initFCLayer((conv2.outputs*conv2.out_width*conv2.out_height) / (pool2.stride * pool2.stride), 500);
-		Layer_t<value_type> fc1act; fc1act.initLayer(fc1.outputs);
-		Layer_t<value_type> fc2; 	fc2.initFCLayer(fc1act.outputs, 10);
-		Layer_t<value_type> fc2act; fc2act.initLayer(fc2.outputs);
+		Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, IMAGE_H, IMAGE_W);
+
+		Layer_t<value_type> pool1; 	pool1.initPoolLayer("pool1", 2, 2, conv1);
+
+		Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", conv1.outputs, 50, 5, conv1.out_width / pool1.stride, conv1.out_height / pool1.stride, conv1.outputs * (conv1.out_height / pool1.stride) * (conv1.out_width / pool1.stride));
+		Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2);
+
+		Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", (conv2.outputs*conv2.out_width*conv2.out_height) / (pool2.stride * pool2.stride), 500);
+		Layer_t<value_type> fc1act; fc1act.initLayer(	"fc1act", ACT_LAYER, fc1.outputs);
+
+		Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", fc1act.outputs, 10);
+
+		Layer_t<value_type> fc2act; fc2act.initLayer(	"fc2act", ACT_LAYER, fc2.outputs);
 	
 		// Contains Training and Testing Examples
 		value_type *train_data, *testing_data;
@@ -1588,7 +1555,7 @@ int main(int argc, char *argv[])
 		delete [] perm;
 	
 		// Try to load learned weights from file other wise start learning phase
-		if (conv1.load("conv1") && conv2.load("conv2") && fc1.load("fc1") && fc2.load("fc2"))
+		if (conv1.load() && conv2.load() && fc1.load() && fc2.load())
 		{
 			conv1.copyDataToDevice();
 			conv2.copyDataToDevice();
@@ -1638,7 +1605,7 @@ int main(int argc, char *argv[])
 			fc1.copyDataToHost();
 			fc2.copyDataToHost();
 			// Save the weights in a binary file
-			if (conv1.save("conv1") && conv2.save("conv2") && fc1.save("fc1") && fc2.save("fc2"))
+			if (conv1.save() && conv2.save() && fc1.save() && fc2.save())
 				println("Weights Saved.");
 		}
 	
