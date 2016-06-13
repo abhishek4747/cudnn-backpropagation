@@ -107,7 +107,7 @@
  *****************************************************************************/
 
 const std::string weights_folder = "bins/";
-double learning_rate = -0.1;
+double learning_rate = 0.1;
 
 /******************************************************************************
  * HELPER FUNCTIONS for classes
@@ -244,6 +244,45 @@ void printDeviceVector(int size, value_type* vec_d)
 }
 
 /******************************************************************************
+ * demonstrate different ways of setting tensor descriptor
+ *****************************************************************************/
+
+//#define SIMPLE_TENSOR_DESCRIPTOR
+#define ND_TENSOR_DESCRIPTOR
+void setTensorDesc(cudnnTensorDescriptor_t& tensorDesc, 
+					cudnnTensorFormat_t& tensorFormat,
+					cudnnDataType_t& dataType,
+					int n,
+					int c,
+					int h,
+					int w)
+{
+#if SIMPLE_TENSOR_DESCRIPTOR
+	checkCUDNN( cudnnSetTensor4dDescriptor(tensorDesc,
+											tensorFormat,
+											dataType,
+											n, c,
+											h,
+											w ) );
+#elif defined(ND_TENSOR_DESCRIPTOR)
+	const int nDims = 4;
+	int dimA[nDims] = {n,c,h,w};
+	int strideA[nDims] = {c*h*w, h*w, w, 1};
+	checkCUDNN( cudnnSetTensorNdDescriptor(tensorDesc,
+											dataType,
+											4,
+											dimA,
+											strideA ) ); 
+#else
+	checkCUDNN( cudnnSetTensor4dDescriptorEx(tensorDesc,
+											dataType,
+											n, c,
+											h, w,
+											c*h*w, h*w, w, 1) );
+#endif
+}
+
+/******************************************************************************
  * Defining Layer Types
  *****************************************************************************/
 
@@ -293,6 +332,9 @@ struct Layer_t
 
 
 	// Activation Layer
+	cudnnActivationDescriptor_t  activDesc;
+	cudnnTensorDescriptor_t actSrcTensorDesc, actDstTensorDesc;
+	cudnnTensorDescriptor_t actSrcDiffTensorDesc, actDstDiffTensorDesc;
 
 
 	// Normal Layer
@@ -520,6 +562,24 @@ struct Layer_t
 		
 		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs)) );
 		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(inputs)) );
+
+		checkCUDNN( cudnnCreateActivationDescriptor(&activDesc) );
+		checkCUDNN( cudnnSetActivationDescriptor(activDesc,
+												CUDNN_ACTIVATION_SIGMOID,
+												CUDNN_PROPAGATE_NAN,
+												0.0) );
+
+		checkCUDNN( cudnnCreateTensorDescriptor(&actSrcTensorDesc) );
+		checkCUDNN( cudnnCreateTensorDescriptor(&actDstTensorDesc) );
+		checkCUDNN( cudnnCreateTensorDescriptor(&actSrcDiffTensorDesc) );
+		checkCUDNN( cudnnCreateTensorDescriptor(&actDstDiffTensorDesc) );
+
+		int n, c, h, w;
+		n = h = w = 1; c = inputs;
+		setTensorDesc(actSrcTensorDesc, tensorFormat, dataType, n, c, h, w);
+		setTensorDesc(actDstTensorDesc, tensorFormat, dataType, n, c, h, w);
+		setTensorDesc(actSrcDiffTensorDesc, tensorFormat, dataType, n, c, h, w);
+		setTensorDesc(actDstDiffTensorDesc, tensorFormat, dataType, n, c, h, w);
 	}
 
 	void destroyConvLayer(){
@@ -531,10 +591,18 @@ struct Layer_t
 		checkCUDNN(cudnnDestroyTensorDescriptor(convBiasTensor));
 	}
 
-	void destoryPoolLayer(){
+	void destroyPoolLayer(){
 		checkCUDNN(cudnnDestroyTensorDescriptor(poolSrcTensor));
 		checkCUDNN(cudnnDestroyTensorDescriptor(poolDstTensor));
 		checkCUDNN(cudnnDestroyPoolingDescriptor(poolDesc));
+	}
+
+	void destroyLayer(){
+		checkCUDNN( cudnnDestroyActivationDescriptor(activDesc) );
+		checkCUDNN( cudnnDestroyTensorDescriptor(actSrcTensorDesc) );
+		checkCUDNN( cudnnDestroyTensorDescriptor(actDstTensorDesc) );
+		checkCUDNN( cudnnDestroyTensorDescriptor(actSrcDiffTensorDesc) );
+		checkCUDNN( cudnnDestroyTensorDescriptor(actDstDiffTensorDesc) );
 	}
 
 	void copyDataToDevice(){
@@ -589,45 +657,6 @@ private:
 
 
 /******************************************************************************
- * demonstrate different ways of setting tensor descriptor
- *****************************************************************************/
-
-//#define SIMPLE_TENSOR_DESCRIPTOR
-#define ND_TENSOR_DESCRIPTOR
-void setTensorDesc(cudnnTensorDescriptor_t& tensorDesc, 
-					cudnnTensorFormat_t& tensorFormat,
-					cudnnDataType_t& dataType,
-					int n,
-					int c,
-					int h,
-					int w)
-{
-#if SIMPLE_TENSOR_DESCRIPTOR
-	checkCUDNN( cudnnSetTensor4dDescriptor(tensorDesc,
-											tensorFormat,
-											dataType,
-											n, c,
-											h,
-											w ) );
-#elif defined(ND_TENSOR_DESCRIPTOR)
-	const int nDims = 4;
-	int dimA[nDims] = {n,c,h,w};
-	int strideA[nDims] = {c*h*w, h*w, w, 1};
-	checkCUDNN( cudnnSetTensorNdDescriptor(tensorDesc,
-											dataType,
-											4,
-											dimA,
-											strideA ) ); 
-#else
-	checkCUDNN( cudnnSetTensor4dDescriptorEx(tensorDesc,
-											dataType,
-											n, c,
-											h, w,
-											c*h*w, h*w, w, 1) );
-#endif
-}
-
-/******************************************************************************
  * network_t class : contains all learning functions
  *****************************************************************************/
 
@@ -649,7 +678,6 @@ class network_t
 	cudnnFilterDescriptor_t filterDesc;
 	cudnnConvolutionDescriptor_t convDesc;
 	cudnnPoolingDescriptor_t     poolingDesc;
-	cudnnActivationDescriptor_t  activDesc;
 	cudnnLRNDescriptor_t   normDesc;
 	cublasHandle_t cublasHandle;
 	cudnnConvolutionFwdAlgo_t convAlgo;
@@ -665,7 +693,6 @@ class network_t
 		checkCUDNN( cudnnCreateFilterDescriptor(&filterDesc) );
 		checkCUDNN( cudnnCreateConvolutionDescriptor(&convDesc) );
 		checkCUDNN( cudnnCreatePoolingDescriptor(&poolingDesc) );
-		checkCUDNN( cudnnCreateActivationDescriptor(&activDesc) );
 		checkCUDNN( cudnnCreateLRNDescriptor(&normDesc) );
 	
 		checkCublasErrors( cublasCreate(&cublasHandle) );
@@ -676,7 +703,6 @@ class network_t
 	{
 		checkCUDNN( cudnnDestroyLRNDescriptor(normDesc) );
 		checkCUDNN( cudnnDestroyPoolingDescriptor(poolingDesc) );
-		checkCUDNN( cudnnDestroyActivationDescriptor(activDesc) );
 		checkCUDNN( cudnnDestroyConvolutionDescriptor(convDesc) );
 		checkCUDNN( cudnnDestroyFilterDescriptor(filterDesc) );
 		checkCUDNN( cudnnDestroyTensorDescriptor(srcTensorDesc) );
@@ -746,14 +772,12 @@ class network_t
 		// println("fullyConnectedforward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		int dim_x = c*h*w;
 		int dim_y = layer.outputs;
-		// resize(dim_y, &layer.output_d);
+		
 
 		scaling_type alpha = scaling_type(1), beta = scaling_type(1);
-		// place bias into dstData
+		
 		checkCudaErrors( cudaMemcpy(layer.output_d, layer.bias_d, MSIZE(dim_y), cudaMemcpyDeviceToDevice) );
 		
-		// gemv(cublasHandle, dim_x, dim_y, alpha,
-		// 		layer.data_d, srcData, beta, layer.output_d);
 		checkCublasErrors( CUBLAS_GEMV(cublasHandle, CUBLAS_OP_T,
                                   dim_x, dim_y,
                                   &alpha,
@@ -1058,25 +1082,16 @@ class network_t
 							int &n, int &c, int &h, int &w, value_type* srcData)
 	{
 		// println("activationForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-		checkCUDNN( cudnnSetActivationDescriptor(activDesc,
-												CUDNN_ACTIVATION_SIGMOID,
-												CUDNN_PROPAGATE_NAN,
-												0.0) );
-	
-		// resize(n*c*h*w, &(layer.output_d));
-
-		setTensorDesc(srcTensorDesc, tensorFormat, dataType, n, c, h, w);
-		setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);
 
 		scaling_type alpha = scaling_type(1);
 		scaling_type beta  = scaling_type(0);
 		checkCUDNN( cudnnActivationForward(cudnnHandle,
-											activDesc,
+											layer.activDesc,
 											&alpha,
-											srcTensorDesc,
+											layer.actSrcTensorDesc,
 											srcData,
 											&beta,
-											dstTensorDesc,
+											layer.actDstTensorDesc,
 											layer.output_d) );    
 	}
 
@@ -1100,48 +1115,20 @@ class network_t
 							value_type *srcDiffData, value_type* srcData)
 	{
 		// println("activationBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-		checkCUDNN( cudnnSetActivationDescriptor(activDesc,
-												CUDNN_ACTIVATION_SIGMOID,
-												CUDNN_PROPAGATE_NAN,
-												0.0) );
-		// resize(n*c*h*w, dstDiffData);
-		checkCUDNN( cudnnSetTensor4dDescriptor(srcTensorDesc,
-												tensorFormat,
-												dataType,
-												n, c,
-												h,
-												w) );
-		checkCUDNN( cudnnSetTensor4dDescriptor(dstTensorDesc,
-												tensorFormat,
-												dataType,
-												n, c,
-												h,
-												w) );
-		checkCUDNN( cudnnSetTensor4dDescriptor(srcDiffTensorDesc,
-												tensorFormat,
-												dataType,
-												n, c,
-												h,
-												w) );
-		checkCUDNN( cudnnSetTensor4dDescriptor(dstDiffTensorDesc,
-												tensorFormat,
-												dataType,
-												n, c,
-												h,
-												w) );
+
 		value_type alpha = value_type(1);
 		value_type beta  = value_type(0);
 		checkCUDNN( cudnnActivationBackward(cudnnHandle,
-											activDesc, // RELU
+											layer.activDesc, // RELU
 											&alpha,
-											srcTensorDesc,
+											layer.actSrcTensorDesc,
 											layer.output_d,
-											srcDiffTensorDesc,
+											layer.actSrcDiffTensorDesc,
 											srcDiffData,
-											dstTensorDesc,
+											layer.actDstTensorDesc,
 											srcData,
 											&beta,
-											dstDiffTensorDesc,
+											layer.actDstDiffTensorDesc,
 											layer.del_d
 											) );    
 	}
@@ -1169,7 +1156,7 @@ class network_t
 		
 		// if (DEBUG) printDeviceVector("\tdelta_W (del_W*hidden_input): \n", layer.inputs*layer.outputs, dstData);
 
-		alpha = value_type(learning_rate); // learning rate
+		alpha = value_type(-learning_rate); // learning rate
 		beta = value_type(1); 
 		//checkCudaErrors( cublasDscal(cublasHandle, ip.inputs*ip.outputs, &alpha, ip.data_d, 1); 
 		const value_type* B = layer.data_d;
@@ -1252,7 +1239,7 @@ class network_t
 
 		if (DEBUG) printDeviceVector(" gconvW: ", layer.w_size, gconvW);
 
-		alpha = value_type(learning_rate); // learning rate
+		alpha = value_type(-learning_rate); // learning rate
 		checkCudaErrors(cublasDaxpy(cublasHandle, 
 									layer.outputs*layer.inputs*layer.kernel_dim*layer.kernel_dim,
 									&alpha, 
@@ -1728,6 +1715,7 @@ void run_mnist()
 {
 	typedef MATRIX_DATA_TYPE value_type;
 	// Define and initialize network
+	learning_rate = 0.1;
 	network_t<value_type> alexnet;
 
 	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", N, 100);
@@ -1908,7 +1896,7 @@ int main(int argc, char *argv[])
 
 	srand(time(NULL));
 
-	bool alexnet = true;
+	bool alexnet = false;
 	if (alexnet)
 	{
 		run_alexnet();
