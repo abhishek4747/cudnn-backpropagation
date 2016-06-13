@@ -1543,6 +1543,9 @@ void run_alexnet()
 {
 	typedef MATRIX_DATA_TYPE value_type;
 	// Define and initialize network
+	const double base_learning_rate = 0.08;
+	const double base_gamma = 0.1;
+	const double base_power = 2;
 	network_t<value_type> alexnet;
 	Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, IMAGE_H, IMAGE_W);
 
@@ -1646,6 +1649,8 @@ void run_alexnet()
 		while(iterations++ < max_iterations){ // TODO: Use a better convergence criteria
 			// Training Iteration
 			{
+				learning_rate = base_learning_rate*pow((1.0+base_gamma*(iterations-1)), -base_power);
+				print("learning rate: "<<learning_rate<<" ");
 				std::clock_t    start;
 				start = std::clock();
 				for (int i=0; i<m; i++){
@@ -1715,7 +1720,9 @@ void run_mnist()
 {
 	typedef MATRIX_DATA_TYPE value_type;
 	// Define and initialize network
-	learning_rate = 0.1;
+	const double base_learning_rate = 0.1;
+	const double base_gamma = 0.1;
+	const double base_power = 1;
 	network_t<value_type> alexnet;
 
 	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", N, 100);
@@ -1809,6 +1816,8 @@ void run_mnist()
 		while(iterations++ < max_iterations ){ // TODO: Use a better convergence criteria
 			// Training Iteration
 			{
+				learning_rate = base_learning_rate*pow((1.0+base_gamma*(iterations-1)), -base_power);
+				print("learning rate: "<<learning_rate<<" ");
 				std::clock_t    start;
 				start = std::clock();
 				for (int i=0; i<m; i++){
