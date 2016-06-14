@@ -1507,8 +1507,7 @@ void run_alexnet()
 
 	Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", fc1act.outputs, 10);
 
-	// Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs);
-	Layer_t<value_type> layers[1]; layers[0].initActLayer("fc2act", fc2.outputs);
+	Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs);
 
 	// Contains Training and Testing Examples
 	value_type *train_data, *testing_data;
@@ -1576,7 +1575,7 @@ void run_alexnet()
 			
 			for (int i=0; i<n; i++){
 				value_type target = testing_target[i];
-				value_type predicted = alexnet.predict_example(image_data_d2 + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, layers[0]);
+				value_type predicted = alexnet.predict_example(image_data_d2 + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act);
 				
 				if (target == predicted){
 					correct++;
@@ -1605,7 +1604,7 @@ void run_alexnet()
 				for (int i=0; i<m; i++){
 					if (DEBUG) print("\n\n\n\n\n");
 					value_type target = train_target[i];
-					value_type predicted = alexnet.learn_example(image_data_d +i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, layers[0], target);
+					value_type predicted = alexnet.learn_example(image_data_d +i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, target);
 					if (DEBUG) getchar();
 					else if (i%1000==0) print("."<<std::flush);
 					//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
@@ -1631,7 +1630,7 @@ void run_alexnet()
 				
 				for (int i=0; i<n; i++){
 					value_type target = testing_target[i];
-					value_type predicted = alexnet.predict_example(image_data_d2 + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, layers[0]);
+					value_type predicted = alexnet.predict_example(image_data_d2 + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act);
 					
 					if (target == predicted){
 						correct++;
