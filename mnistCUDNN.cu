@@ -500,27 +500,28 @@ struct Layer_t
 		checkCUDNN(cudnnCreateTensorDescriptor(&poolDstTensor));
 		checkCUDNN(cudnnCreatePoolingDescriptor(&poolDesc));
 
-		// checkCUDNN(cudnnSetTensor4dDescriptor(poolSrcTensor,
-  //                                             tensorFormat,
-  //                                             dataType,
-  //                                             1, conv.outputs,
-  //                                             conv.out_height / stride,
-		// 									  conv.out_width / stride));
-
-
-		// checkCUDNN(cudnnSetTensor4dDescriptor(poolDstTensor,
-  //                                             tensorFormat,
-  //                                             dataType,
-  //                                             1, conv.outputs,
-  //                                             conv.out_height / stride,
-		// 									  conv.out_width / stride));
-
 		checkCUDNN(cudnnSetPooling2dDescriptor(poolDesc,
 											   CUDNN_POOLING_MAX,
 											   CUDNN_PROPAGATE_NAN,
 											   size, size,
 											   0, 0,
 											   stride, stride));
+
+		int n, c, h, w;
+		n = 1; c = conv.outputs; h=conv.out_height; w=conv.out_width;
+		setTensorDesc(poolSrcTensor, tensorFormat, dataType, n, c, h, w);        
+
+		const int tensorDims = 4;
+		int tensorOuputDimA[tensorDims] = {n,c,h,w};
+		checkCUDNN( cudnnGetPoolingNdForwardOutputDim(poolDesc,
+													poolSrcTensor,
+													tensorDims,
+													tensorOuputDimA) );
+		n = tensorOuputDimA[0]; c = tensorOuputDimA[1];
+		h = tensorOuputDimA[2]; w = tensorOuputDimA[3];
+		// println("poolingForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		
+		setTensorDesc(poolDstTensor, tensorFormat, dataType, n, c, h, w);  
 	}
 
 	void initFCLayer(std::string _layername, int _inputs, int _outputs){
@@ -912,33 +913,9 @@ class network_t
 					  int& n, int& c, int& h, int& w,
 					  value_type* srcData)
 	{
-		// const int poolDims = 2;
-		// int windowDimA[poolDims] = {2,2};
-		// int paddingA[poolDims] = {0,0};
-		// int strideA[poolDims] = {2,2};
-		// checkCUDNN( cudnnSetPoolingNdDescriptor(layer.poolDesc,
-		// 										CUDNN_POOLING_MAX,
-		// 										CUDNN_PROPAGATE_NAN,
-		// 										poolDims,
-		// 										windowDimA,
-		// 										paddingA,
-		// 										strideA ) );
+	 	h /= layer.stride; w /= layer.stride;
 
-		setTensorDesc((cudnnTensorDescriptor_t&)layer.poolSrcTensor, tensorFormat, dataType, n, c, h, w);        
-
-		const int tensorDims = 4;
-		int tensorOuputDimA[tensorDims] = {n,c,h,w};
-		checkCUDNN( cudnnGetPoolingNdForwardOutputDim(layer.poolDesc,
-													layer.poolSrcTensor,
-													tensorDims,
-													tensorOuputDimA) );
-		n = tensorOuputDimA[0]; c = tensorOuputDimA[1];
-		h = tensorOuputDimA[2]; w = tensorOuputDimA[3];
-		// println("poolingForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-		
-		setTensorDesc((cudnnTensorDescriptor_t&)layer.poolDstTensor, tensorFormat, dataType, n, c, h, w);  
-	 
-		// resize(n*c*h*w, &(layer.output_d));
+	 	// println("pooling forward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		if (DEBUG) printDeviceVector("Pooling Input:\n", layer.inputs, layer.output_d);
 		scaling_type alpha = scaling_type(1);
 		scaling_type beta = scaling_type(0);
@@ -957,7 +934,7 @@ class network_t
 						int& n, int& c, int& h, int& w,
 						value_type* diffData, value_type* srcData)
 	{
-		if (DEBUG) println("poolingback::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
+		// println("poolingback::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 
 		value_type alpha = value_type(1.0);
 		value_type beta  = value_type(0.0);
@@ -1905,7 +1882,7 @@ int main(int argc, char *argv[])
 
 	srand(time(NULL));
 
-	bool alexnet = false;
+	bool alexnet = true;
 	if (alexnet)
 	{
 		run_alexnet();
