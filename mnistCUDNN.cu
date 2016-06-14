@@ -686,14 +686,6 @@ class network_t
 	void createHandles()
 	{
 		checkCUDNN( cudnnCreate(&cudnnHandle) );
-		checkCUDNN( cudnnCreateTensorDescriptor(&srcTensorDesc) );
-		checkCUDNN( cudnnCreateTensorDescriptor(&dstTensorDesc) );
-		checkCUDNN( cudnnCreateTensorDescriptor(&biasTensorDesc) );
-		checkCUDNN( cudnnCreateTensorDescriptor(&srcDiffTensorDesc) );
-		checkCUDNN( cudnnCreateTensorDescriptor(&dstDiffTensorDesc) );
-		checkCUDNN( cudnnCreateFilterDescriptor(&filterDesc) );
-		checkCUDNN( cudnnCreateConvolutionDescriptor(&convDesc) );
-		checkCUDNN( cudnnCreatePoolingDescriptor(&poolingDesc) );
 		checkCUDNN( cudnnCreateLRNDescriptor(&normDesc) );
 	
 		checkCublasErrors( cublasCreate(&cublasHandle) );
@@ -703,14 +695,6 @@ class network_t
 	void destroyHandles()
 	{
 		checkCUDNN( cudnnDestroyLRNDescriptor(normDesc) );
-		checkCUDNN( cudnnDestroyPoolingDescriptor(poolingDesc) );
-		checkCUDNN( cudnnDestroyConvolutionDescriptor(convDesc) );
-		checkCUDNN( cudnnDestroyFilterDescriptor(filterDesc) );
-		checkCUDNN( cudnnDestroyTensorDescriptor(srcTensorDesc) );
-		checkCUDNN( cudnnDestroyTensorDescriptor(dstTensorDesc) );
-		checkCUDNN( cudnnDestroyTensorDescriptor(biasTensorDesc) );
-		checkCUDNN( cudnnDestroyTensorDescriptor(srcDiffTensorDesc) );
-		checkCUDNN( cudnnDestroyTensorDescriptor(dstDiffTensorDesc) );
 		checkCUDNN( cudnnDestroy(cudnnHandle) );
 
 		checkCublasErrors( cublasDestroy(cublasHandle) );
@@ -790,59 +774,22 @@ class network_t
 		h = 1; w = 1; c = dim_y;
 	}
 
-	void convoluteForward(const Layer_t<value_type>& conv,
+	void convoluteForward(const Layer_t<value_type>& layer,
 						  int& n, int& c, int& h, int& w,
 						  value_type* srcData)
 	{
+		c = layer.outputs; h = layer.out_height; w = layer.out_width;
 
-		setTensorDesc(srcTensorDesc, tensorFormat, dataType, n, c, h, w);
-
-		const int tensorDims = 4;
-		int tensorOuputDimA[tensorDims] = {n,c,h,w};
-		const int filterDimA[tensorDims] = {conv.outputs, conv.inputs, 
-										conv.kernel_dim, conv.kernel_dim};
-									   
-		checkCUDNN( cudnnSetFilterNdDescriptor(filterDesc,
-											  dataType,
-											  tensorFormat,
-											  tensorDims,
-											  filterDimA) );
- 
-		const int convDims = 2;
-		int padA[convDims] = {0,0};
-		int filterStrideA[convDims] = {1,1};
-		int upscaleA[convDims] = {1,1};
-		cudnnDataType_t  convDataType = dataType;
-		checkCUDNN( cudnnSetConvolutionNdDescriptor(convDesc,
-													convDims,
-													padA,
-													filterStrideA,
-													upscaleA,
-													CUDNN_CROSS_CORRELATION,
-													convDataType) );
-		// find dimension of convolution output
-		checkCUDNN( cudnnGetConvolutionNdForwardOutputDim(convDesc,
-												srcTensorDesc,
-												filterDesc,
-												tensorDims,
-												tensorOuputDimA) );
-		n = tensorOuputDimA[0]; c = tensorOuputDimA[1];
-		h = tensorOuputDimA[2]; w = tensorOuputDimA[3];
-
-		// println("convoluteForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-		setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);
-
-		// resize(n*c*h*w, &(conv.output_d));
-		if (DEBUG) printDeviceVector("Conv Weights:\n", conv.w_size, conv.data_d);
-		if (DEBUG) printDeviceVector("Conv Bias:\n", conv.b_size, conv.bias_d);
+		if (DEBUG) printDeviceVector("Conv Weights:\n", layer.w_size, layer.data_d);
+		if (DEBUG) printDeviceVector("Conv Bias:\n", layer.b_size, layer.bias_d);
 		size_t sizeInBytes=0;
 		void* workSpace=NULL;
 		checkCUDNN( cudnnGetConvolutionForwardWorkspaceSize(cudnnHandle,
-												srcTensorDesc,
-												filterDesc,
-												convDesc,
-												dstTensorDesc,
-												convAlgo,
+												layer.srcTensorDesc,
+												layer.convFilterDesc,
+												layer.convDesc,
+												layer.dstTensorDesc,
+												layer.convAlgo,
 												&sizeInBytes) );
 		if (sizeInBytes!=0)
 		{
@@ -852,19 +799,19 @@ class network_t
 		scaling_type beta  = scaling_type(0);
 		checkCUDNN( cudnnConvolutionForward(cudnnHandle,
 											  &alpha,
-											  srcTensorDesc,
+											  layer.srcTensorDesc,
 											  srcData,
-											  filterDesc,
-											  conv.data_d,
-											  convDesc,
-											  convAlgo,
+											  layer.convFilterDesc,
+											  layer.data_d,
+											  layer.convDesc,
+											  layer.convAlgo,
 											  workSpace,
 											  sizeInBytes,
 											  &beta,
-											  dstTensorDesc,
-											  conv.output_d) );
-		addBias(dstTensorDesc, conv, c, conv.output_d);
-		if (DEBUG) printDeviceVector("Conv Output:\n", conv.outputs*conv.out_height*conv.out_width, conv.output_d);
+											  layer.dstTensorDesc,
+											  layer.output_d) );
+		addBias(layer.dstTensorDesc, layer, c, layer.output_d);
+		if (DEBUG) printDeviceVector("Conv Output:\n", layer.outputs*layer.out_height*layer.out_width, layer.output_d);
 		if (sizeInBytes!=0)
 		{
 		  checkCudaErrors( cudaFree(workSpace) );
@@ -1028,31 +975,31 @@ class network_t
 	}
 	void lrnForward(int &n, int &c, int &h, int &w, value_type* srcData, value_type** dstData)
 	{
-		unsigned lrnN = 5;
-		double lrnAlpha, lrnBeta, lrnK;
-		lrnAlpha = 0.0001; lrnBeta = 0.75; lrnK = 1.0;
-		checkCUDNN( cudnnSetLRNDescriptor(normDesc,
-											lrnN,
-											lrnAlpha,
-											lrnBeta,
-											lrnK) );
+		// unsigned lrnN = 5;
+		// double lrnAlpha, lrnBeta, lrnK;
+		// lrnAlpha = 0.0001; lrnBeta = 0.75; lrnK = 1.0;
+		// checkCUDNN( cudnnSetLRNDescriptor(normDesc,
+		// 									lrnN,
+		// 									lrnAlpha,
+		// 									lrnBeta,
+		// 									lrnK) );
 
-		resize(n*c*h*w, dstData);
+		// resize(n*c*h*w, dstData);
 
-		setTensorDesc(srcTensorDesc, tensorFormat, dataType, n, c, h, w);
-		setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);
+		// setTensorDesc(srcTensorDesc, tensorFormat, dataType, n, c, h, w);
+		// setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);
 
-		scaling_type alpha = scaling_type(1);
-		scaling_type beta  = scaling_type(0);
-		checkCUDNN( cudnnLRNCrossChannelForward(cudnnHandle,
-											normDesc,
-											CUDNN_LRN_CROSS_CHANNEL_DIM1,
-											&alpha,
-											srcTensorDesc,
-											srcData,
-											&beta,
-											dstTensorDesc,
-											*dstData) );
+		// scaling_type alpha = scaling_type(1);
+		// scaling_type beta  = scaling_type(0);
+		// checkCUDNN( cudnnLRNCrossChannelForward(cudnnHandle,
+		// 									normDesc,
+		// 									CUDNN_LRN_CROSS_CHANNEL_DIM1,
+		// 									&alpha,
+		// 									srcTensorDesc,
+		// 									srcData,
+		// 									&beta,
+		// 									dstTensorDesc,
+		// 									*dstData) );
 	}
 
 	void activationForward(const Layer_t<value_type>& layer, 
