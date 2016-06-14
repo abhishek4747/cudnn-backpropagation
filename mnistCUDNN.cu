@@ -379,17 +379,16 @@ struct Layer_t
 		}
 	}
 
-	size_t initConvLayer(std::string _layername, int _inputs, int _outputs, int _kernel_dim, int _in_height, int _in_width, int _d_size=0)
+	void initConvLayer(std::string _layername, int _inputs, int _outputs, int _kernel_dim, int _stride, int _in_height, int _in_width, int _d_size=0)
 	{
 		layerType 	= CONV_LAYER;
 		layername 	= _layername;
 		inputs 		= _inputs;
 		outputs 	= _outputs;
 		kernel_dim 	= _kernel_dim;
+		stride 		= _stride;
 		in_width 	= _in_width;
 		in_height 	= _in_height;
-		out_width 	= in_width - kernel_dim + 1;			// Stride is 1	// TODO: Make Generic
-		out_height 	= in_height - kernel_dim + 1;			// Stride is 1	// TODO: Make Generic
 		w_size 		= inputs*outputs*kernel_dim*kernel_dim;
 		b_size 		= outputs;
 
@@ -404,12 +403,7 @@ struct Layer_t
 			bias_h[i] = (((value_type)rand())/(rand()+1))/100000;
 		
 		
-		checkCudaErrors( cudaMalloc(&data_d, 	MSIZE(w_size)) );
-		checkCudaErrors( cudaMalloc(&bias_d, 	MSIZE(b_size)) );
-		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs*out_height*out_width)) );
-		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(_d_size)) );
-
-		copyDataToDevice();
+		
 
 		checkCUDNN(cudnnCreateTensorDescriptor(&convTensor));
 		checkCUDNN(cudnnCreateTensorDescriptor(&srcTensorDesc));
@@ -447,7 +441,7 @@ struct Layer_t
  
         checkCUDNN(cudnnSetConvolution2dDescriptor(convDesc,
                                                    0, 0,	//	padding
-                                                   1, 1,	//	stride
+                                                   stride, stride,	//	stride
                                                    1, 1,	// 	upscaling
                                                    CUDNN_CROSS_CORRELATION));
         // Find dimension of convolution output
@@ -455,6 +449,9 @@ struct Layer_t
                                                          srcTensorDesc,
                                                          convFilterDesc,
                                                          &n, &c, &h, &w));
+
+        out_width 	= w;			
+		out_height 	= h;			
 		
 		checkCUDNN(cudnnSetTensor4dDescriptor(convTensor,
                                               tensorFormat,
@@ -489,7 +486,13 @@ struct Layer_t
         // println("Best Conv Algo "<<convAlgo);
         convAlgo = (cudnnConvolutionFwdAlgo_t)convAlgo;
         checkCUDNN( cudnnDestroy(cudnnHandle) );
-		return sizeInBytes;
+
+		checkCudaErrors( cudaMalloc(&data_d, 	MSIZE(w_size)) );
+		checkCudaErrors( cudaMalloc(&bias_d, 	MSIZE(b_size)) );
+		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs*out_height*out_width)) );
+		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(_d_size)) );
+
+		copyDataToDevice();
 	}
 
 	void initPoolLayer(std::string _layername, int _size, int _stride, const Layer_t<value_type>& conv)
@@ -499,12 +502,8 @@ struct Layer_t
 		size 		= _size;
 		stride 		= _stride;
 		w_size		= 0;
-		b_size		= conv.outputs*(conv.out_width / stride) * (conv.out_height / stride);
-		outputs 	= b_size;
-		inputs  	= conv.outputs*conv.out_width*conv.out_height; 
+		kernel_dim  = conv.outputs;
 		
-		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs)) );
-		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(inputs)) );
 
 		checkCUDNN(cudnnCreateTensorDescriptor(&poolSrcTensor));
 		checkCUDNN(cudnnCreateTensorDescriptor(&poolDstTensor));
@@ -519,6 +518,8 @@ struct Layer_t
 
 		int n, c, h, w;
 		n = 1; c = conv.outputs; h=conv.out_height; w=conv.out_width;
+		in_height = h;
+		in_width  = w;
 		setTensorDesc(poolSrcTensor, tensorFormat, dataType, n, c, h, w);        
 
 		const int tensorDims = 4;
@@ -529,9 +530,19 @@ struct Layer_t
 													tensorOuputDimA) );
 		n = tensorOuputDimA[0]; c = tensorOuputDimA[1];
 		h = tensorOuputDimA[2]; w = tensorOuputDimA[3];
+
+		out_height = h;
+		out_width  = w;
 		// println("poolingForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		
 		setTensorDesc(poolDstTensor, tensorFormat, dataType, n, c, h, w);  
+
+		b_size		= kernel_dim * out_width * out_height;
+		outputs 	= b_size;
+		inputs  	= kernel_dim * in_width * in_height; 
+		
+		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs)) );
+		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(inputs)) );
 	}
 
 	void initFCLayer(std::string _layername, int _inputs, int _outputs){
@@ -1452,198 +1463,203 @@ void readImageToDevice(const char* fname, value_type **image_data_d){
 	checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, MSIZE(N), cudaMemcpyHostToDevice) );
 }
 
-void run_alexnet()
-{
-	typedef MATRIX_DATA_TYPE value_type;
-	// Define and initialize network
-	const double base_learning_rate = 0.01;
-	const double base_gamma = 0.001;
-	const double base_power = 0.75;
-	network_t<value_type> alexnet;
-	Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, IMAGE_H, IMAGE_W);
+// void run_alexnet()
+// {
+// 	typedef MATRIX_DATA_TYPE value_type;
+// 	// Define and initialize network
+// 	const double base_learning_rate = 0.01;
+// 	const double base_gamma = 0.001;
+// 	const double base_power = 0.75;
+// 	network_t<value_type> alexnet;
+// 	Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, IMAGE_H, IMAGE_W);
 
-	Layer_t<value_type> pool1; 	pool1.initPoolLayer("pool1", 2, 2, conv1);
+// 	Layer_t<value_type> pool1; 	pool1.initPoolLayer("pool1", 2, 2, conv1);
 
-	Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", conv1.outputs, 50, 5, conv1.out_width / pool1.stride, conv1.out_height / pool1.stride, conv1.outputs * (conv1.out_height / pool1.stride) * (conv1.out_width / pool1.stride));
-	Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2);
+// 	Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", conv1.outputs, 50, 5, conv1.out_width / pool1.stride, conv1.out_height / pool1.stride, conv1.outputs * (conv1.out_height / pool1.stride) * (conv1.out_width / pool1.stride));
+// 	Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2);
 
-	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", (conv2.outputs*conv2.out_width*conv2.out_height) / (pool2.stride * pool2.stride), 500);
-	Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs);
+// 	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", (conv2.outputs*conv2.out_width*conv2.out_height) / (pool2.stride * pool2.stride), 500);
+// 	Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs);
 
-	Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", fc1act.outputs, 10);
+// 	Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", fc1act.outputs, 10);
 
-	Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs);
+// 	Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs);
 
-	// Contains Training and Testing Examples
-	value_type *train_data, *testing_data;
-	value_type *train_target, *testing_target;
+// 	// Contains Training and Testing Examples
+// 	value_type *train_data, *testing_data;
+// 	value_type *train_target, *testing_target;
 
-	// Read training data in tempraroy variables
-	value_type *temp_training_data;
-	value_type *temp_training_target;
+// 	// Read training data in tempraroy variables
+// 	value_type *temp_training_data;
+// 	value_type *temp_training_target;
 
-	int total_train_data, total_test_data;
-	alexnet.load_mnist_data(&temp_training_data, &testing_data, &temp_training_target, &testing_target, total_train_data, total_test_data);
-	println("\n\nData Loaded. Training examples:"<<total_train_data/N<<" Testing examples:"<<total_test_data/N<<" Data dimension:"<<N);
+// 	int total_train_data, total_test_data;
+// 	alexnet.load_mnist_data(&temp_training_data, &testing_data, &temp_training_target, &testing_target, total_train_data, total_test_data);
+// 	println("\n\nData Loaded. Training examples:"<<total_train_data/N<<" Testing examples:"<<total_test_data/N<<" Data dimension:"<<N);
 
-	// Shuffle training data
-	int m = total_train_data/N;
-	int *perm = new int[m];
-	for (int i=0; i<m; i++) perm[i] = i;
-	std::random_shuffle(&perm[0],&perm[m]);
+// 	// Shuffle training data
+// 	int m = total_train_data/N;
+// 	int *perm = new int[m];
+// 	for (int i=0; i<m; i++) perm[i] = i;
+// 	std::random_shuffle(&perm[0],&perm[m]);
 
-	// apply the permutation
-	train_data = new value_type[m*N];
-	train_target = new value_type[m];
-	for (int i=0; i<m; i++){
-		for (int j=0; j<N; j++){
-			train_data[i*N+j] = temp_training_data[perm[i]*N+j];
-		}
-		train_target[i] = temp_training_target[perm[i]];
-	}
-	println("Training Examples shuffled.");
+// 	// apply the permutation
+// 	train_data = new value_type[m*N];
+// 	train_target = new value_type[m];
+// 	for (int i=0; i<m; i++){
+// 		for (int j=0; j<N; j++){
+// 			train_data[i*N+j] = temp_training_data[perm[i]*N+j];
+// 		}
+// 		train_target[i] = temp_training_target[perm[i]];
+// 	}
+// 	println("Training Examples shuffled.");
 
-	// Free some variables
-	delete [] temp_training_data;
-	delete [] temp_training_target;
-	delete [] perm;
+// 	// Free some variables
+// 	delete [] temp_training_data;
+// 	delete [] temp_training_target;
+// 	delete [] perm;
 
-	// Normalizing input data by dividing by 255
-	for (int i=0; i<total_train_data; i++)
-		train_data[i] /= 255;
-	for (int i=0; i<total_test_data; i++)
-		testing_data[i] /= 255;
+// 	// Normalizing input data by dividing by 255
+// 	for (int i=0; i<total_train_data; i++)
+// 		train_data[i] /= 255;
+// 	for (int i=0; i<total_test_data; i++)
+// 		testing_data[i] /= 255;
 
-	value_type* image_data_d = NULL;
-	checkCudaErrors( cudaMalloc(&image_data_d, MSIZE(total_train_data)) );
-	checkCudaErrors( cudaMemcpy(image_data_d, train_data, MSIZE(total_train_data), cudaMemcpyHostToDevice) );
+// 	value_type* image_data_d = NULL;
+// 	checkCudaErrors( cudaMalloc(&image_data_d, MSIZE(total_train_data)) );
+// 	checkCudaErrors( cudaMemcpy(image_data_d, train_data, MSIZE(total_train_data), cudaMemcpyHostToDevice) );
 
-	value_type* image_data_d2 = NULL;
-	checkCudaErrors( cudaMalloc(&image_data_d2, MSIZE(total_test_data)) );	
-	checkCudaErrors( cudaMemcpy(image_data_d2, testing_data, MSIZE(total_test_data), cudaMemcpyHostToDevice) );
+// 	value_type* image_data_d2 = NULL;
+// 	checkCudaErrors( cudaMalloc(&image_data_d2, MSIZE(total_test_data)) );	
+// 	checkCudaErrors( cudaMemcpy(image_data_d2, testing_data, MSIZE(total_test_data), cudaMemcpyHostToDevice) );
 
-	// Try to load learned weights from file other wise start learning phase
-	if (conv1.load() && conv2.load() && fc1.load() && fc2.load())
-	{
-		conv1.copyDataToDevice();
-		conv2.copyDataToDevice();
-		fc1.copyDataToDevice();
-		fc2.copyDataToDevice();
-		println("Weights from file loaded");
-		// Testing Phase
-		{
-			print("\nTesting : ");
-			std::clock_t    start;
-			start = std::clock(); 
-			int correct = 0;
-			int n = total_test_data/N;
+// 	// Try to load learned weights from file other wise start learning phase
+// 	if (conv1.load() && conv2.load() && fc1.load() && fc2.load())
+// 	{
+// 		conv1.copyDataToDevice();
+// 		conv2.copyDataToDevice();
+// 		fc1.copyDataToDevice();
+// 		fc2.copyDataToDevice();
+// 		println("Weights from file loaded");
+// 		// Testing Phase
+// 		{
+// 			print("\nTesting : ");
+// 			std::clock_t    start;
+// 			start = std::clock(); 
+// 			int correct = 0;
+// 			int n = total_test_data/N;
 			
-			for (int i=0; i<n; i++){
-				value_type target = testing_target[i];
-				value_type predicted = alexnet.predict_example(image_data_d2 + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act);
+// 			for (int i=0; i<n; i++){
+// 				value_type target = testing_target[i];
+// 				value_type predicted = alexnet.predict_example(image_data_d2 + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act);
 				
-				if (target == predicted){
-					correct++;
-				}
-				if (!DEBUG && i%1000==0) print("."<<std::flush);
-				// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
-			}
-			println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
-			println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
-		}
-	}
-	else{
-		println("\n **** Learning started ****");
-		std::clock_t    start;
-		start = std::clock(); 
+// 				if (target == predicted){
+// 					correct++;
+// 				}
+// 				if (!DEBUG && i%1000==0) print("."<<std::flush);
+// 				// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+// 			}
+// 			println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
+// 			println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
+// 		}
+// 	}
+// 	else{
+// 		println("\n **** Learning started ****");
+// 		std::clock_t    start;
+// 		start = std::clock(); 
 
-		// Learn all examples till convergence
-		int max_iterations = 50, iterations = 0, best_correct = 0;
-		while(iterations++ < max_iterations){ // TODO: Use a better convergence criteria
-			// Training Iteration
-			{
-				learning_rate = base_learning_rate*pow((1.0+base_gamma*(iterations-1)), -base_power);
-				print("learning rate: "<<learning_rate<<" ");
-				std::clock_t    start;
-				start = std::clock();
-				for (int i=0; i<m; i++){
-					if (DEBUG) print("\n\n\n\n\n");
-					value_type target = train_target[i];
-					value_type predicted = alexnet.learn_example(image_data_d +i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, target);
-					if (DEBUG) getchar();
-					else if (i%1000==0) print("."<<std::flush);
-					//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
-				}
-				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
-			}
+// 		// Learn all examples till convergence
+// 		int max_iterations = 50, iterations = 0, best_correct = 0;
+// 		while(iterations++ < max_iterations){ // TODO: Use a better convergence criteria
+// 			// Training Iteration
+// 			{
+// 				learning_rate = base_learning_rate*pow((1.0+base_gamma*(iterations-1)), -base_power);
+// 				print("learning rate: "<<learning_rate<<" ");
+// 				std::clock_t    start;
+// 				start = std::clock();
+// 				for (int i=0; i<m; i++){
+// 					if (DEBUG) print("\n\n\n\n\n");
+// 					value_type target = train_target[i];
+// 					value_type predicted = alexnet.learn_example(image_data_d +i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, target);
+// 					if (DEBUG) getchar();
+// 					else if (i%1000==0) print("."<<std::flush);
+// 					//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+// 				}
+// 				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
+// 			}
 
-			conv1.copyDataToHost();
-			conv2.copyDataToHost();
-			fc1.copyDataToHost();
-			fc2.copyDataToHost();
-			// Save the weights in a binary file
-			if (conv1.save() && conv2.save() && fc1.save() && fc2.save())
-				println("Weights Saved after "<<iterations<<" iterations.");
+// 			conv1.copyDataToHost();
+// 			conv2.copyDataToHost();
+// 			fc1.copyDataToHost();
+// 			fc2.copyDataToHost();
+// 			// Save the weights in a binary file
+// 			if (conv1.save() && conv2.save() && fc1.save() && fc2.save())
+// 				println("Weights Saved after "<<iterations<<" iterations.");
 
-			// Testing Phase
-			{
-				print("\nTesting ("<<iterations<<") : ");
-				std::clock_t    start;
-				start = std::clock(); 
-				int correct = 0;
-				int n = total_test_data/N;
+// 			// Testing Phase
+// 			{
+// 				print("\nTesting ("<<iterations<<") : ");
+// 				std::clock_t    start;
+// 				start = std::clock(); 
+// 				int correct = 0;
+// 				int n = total_test_data/N;
 				
-				for (int i=0; i<n; i++){
-					value_type target = testing_target[i];
-					value_type predicted = alexnet.predict_example(image_data_d2 + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act);
+// 				for (int i=0; i<n; i++){
+// 					value_type target = testing_target[i];
+// 					value_type predicted = alexnet.predict_example(image_data_d2 + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act);
 					
-					if (target == predicted){
-						correct++;
-					}
-					if (!DEBUG && i%1000==0) print("."<<std::flush);
-					// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
-				}
-				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
-				println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
-				if (correct<best_correct){
-					println("Accuracy started to decrease. Stopping Learning!! "<<correct-best_correct<<" misclassified.");
-					break;
-				}
-				print("Correctly classified "<<(correct-best_correct)<<" new examples. ");
-				best_correct = correct;
-				conv1.copyDataToHost();
-				conv2.copyDataToHost();
-				fc1.copyDataToHost();
-				fc2.copyDataToHost();
-				// Save the weights in a binary file
-				if (conv1.save() && conv2.save() && fc1.save() && fc2.save())
-					println("Weights Saved.");
-			}
-		}
+// 					if (target == predicted){
+// 						correct++;
+// 					}
+// 					if (!DEBUG && i%1000==0) print("."<<std::flush);
+// 					// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+// 				}
+// 				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
+// 				println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
+// 				if (correct<best_correct){
+// 					println("Accuracy started to decrease. Stopping Learning!! "<<correct-best_correct<<" misclassified.");
+// 					break;
+// 				}
+// 				print("Correctly classified "<<(correct-best_correct)<<" new examples. ");
+// 				best_correct = correct;
+// 				conv1.copyDataToHost();
+// 				conv2.copyDataToHost();
+// 				fc1.copyDataToHost();
+// 				fc2.copyDataToHost();
+// 				// Save the weights in a binary file
+// 				if (conv1.save() && conv2.save() && fc1.save() && fc2.save())
+// 					println("Weights Saved.");
+// 			}
+// 		}
 		
-		println("\n **** Learning completed ****");
-		println("Learning Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
-	}
-	checkCudaErrors( cudaFree(image_data_d2) );
-	checkCudaErrors( cudaFree(image_data_d) );
-}
+// 		println("\n **** Learning completed ****");
+// 		println("Learning Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
+// 	}
+// 	checkCudaErrors( cudaFree(image_data_d2) );
+// 	checkCudaErrors( cudaFree(image_data_d) );
+// }
 
 void run_lenet()
 {
 	typedef MATRIX_DATA_TYPE value_type;
+	
 	// Define and initialize network
 	const double base_learning_rate = 0.01;
 	const double base_gamma = 0.001;
 	const double base_power = 0.75;
+	
 	network_t<value_type> lenet;
-	Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, IMAGE_H, IMAGE_W);
+
+	Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, 1, IMAGE_H, IMAGE_W);
 
 	Layer_t<value_type> pool1; 	pool1.initPoolLayer("pool1", 2, 2, conv1);
 
-	Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", conv1.outputs, 50, 5, conv1.out_width / pool1.stride, conv1.out_height / pool1.stride, conv1.outputs * (conv1.out_height / pool1.stride) * (conv1.out_width / pool1.stride));
+	Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", pool1.kernel_dim, 50, 5, 1, pool1.out_width, pool1.out_height, pool1.outputs);
+
 	Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2);
 
-	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", (conv2.outputs*conv2.out_width*conv2.out_height) / (pool2.stride * pool2.stride), 500);
+	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", pool2.outputs, 500);
+
 	Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs);
 
 	Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", fc1act.outputs, 10);
@@ -1805,162 +1821,161 @@ void run_lenet()
 }
 
 
-void run_mnist()
-{
-	typedef MATRIX_DATA_TYPE value_type;
-	// Define and initialize network
-	const double base_learning_rate = 0.01;
-	const double base_gamma = 0.0001;
-	const double base_power = 0.75;
-	network_t<value_type> mnist;
+// void run_mnist()
+// {
+// 	typedef MATRIX_DATA_TYPE value_type;
+// 	// Define and initialize network
+// 	const double base_learning_rate = 0.01;
+// 	const double base_gamma = 0.0001;
+// 	const double base_power = 0.75;
+// 	network_t<value_type> mnist;
 
-	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", N, 100);
-	Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs);
-	Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", fc1act.outputs, 10);
-	Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs);
+// 	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", N, 100);
+// 	Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs);
+// 	Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", fc1act.outputs, 10);
+// 	Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs);
 
-	// Contains Training and Testing Examples
-	value_type *train_data, *testing_data;
-	value_type *train_target, *testing_target;
+// 	// Contains Training and Testing Examples
+// 	value_type *train_data, *testing_data;
+// 	value_type *train_target, *testing_target;
 
-	// Read training data in tempraroy variables
-	value_type *temp_training_data;
-	value_type *temp_training_target;
+// 	// Read training data in tempraroy variables
+// 	value_type *temp_training_data;
+// 	value_type *temp_training_target;
 
-	int total_train_data, total_test_data;
-	mnist.load_mnist_data(&temp_training_data, &testing_data, &temp_training_target, &testing_target, total_train_data, total_test_data);
-	println("\n\nData Loaded. Training examples:"<<total_train_data/N<<" Testing examples:"<<total_test_data/N<<" Data dimension:"<<N);
+// 	int total_train_data, total_test_data;
+// 	mnist.load_mnist_data(&temp_training_data, &testing_data, &temp_training_target, &testing_target, total_train_data, total_test_data);
+// 	println("\n\nData Loaded. Training examples:"<<total_train_data/N<<" Testing examples:"<<total_test_data/N<<" Data dimension:"<<N);
 
-	// Shuffle training data
-	int m = total_train_data/N;
-	int *perm = new int[m];
-	for (int i=0; i<m; i++) perm[i] = i;
-	std::random_shuffle(&perm[0],&perm[m]);
+// 	// Shuffle training data
+// 	int m = total_train_data/N;
+// 	int *perm = new int[m];
+// 	for (int i=0; i<m; i++) perm[i] = i;
+// 	std::random_shuffle(&perm[0],&perm[m]);
 
-	// apply the permutation
-	train_data = new value_type[m*N];
-	train_target = new value_type[m];
-	for (int i=0; i<m; i++){
-		for (int j=0; j<N; j++){
-			train_data[i*N+j] = temp_training_data[perm[i]*N+j];
-		}
-		train_target[i] = temp_training_target[perm[i]];
-	}
-	println("Training Examples shuffled.");
+// 	// apply the permutation
+// 	train_data = new value_type[m*N];
+// 	train_target = new value_type[m];
+// 	for (int i=0; i<m; i++){
+// 		for (int j=0; j<N; j++){
+// 			train_data[i*N+j] = temp_training_data[perm[i]*N+j];
+// 		}
+// 		train_target[i] = temp_training_target[perm[i]];
+// 	}
+// 	println("Training Examples shuffled.");
 
-	// Free some variables
-	delete [] temp_training_data;
-	delete [] temp_training_target;
-	delete [] perm;
+// 	// Free some variables
+// 	delete [] temp_training_data;
+// 	delete [] temp_training_target;
+// 	delete [] perm;
 
-	// Normalizing input data by dividing by 255
-	for (int i=0; i<total_train_data; i++)
-		train_data[i] /= 255;
-	for (int i=0; i<total_test_data; i++)
-		testing_data[i] /= 255;
+// 	// Normalizing input data by dividing by 255
+// 	for (int i=0; i<total_train_data; i++)
+// 		train_data[i] /= 255;
+// 	for (int i=0; i<total_test_data; i++)
+// 		testing_data[i] /= 255;
 
-	value_type* image_data_d = NULL;
-	checkCudaErrors( cudaMalloc(&image_data_d, MSIZE(total_train_data)) );
-	checkCudaErrors( cudaMemcpy(image_data_d, train_data, MSIZE(total_train_data), cudaMemcpyHostToDevice) );
+// 	value_type* image_data_d = NULL;
+// 	checkCudaErrors( cudaMalloc(&image_data_d, MSIZE(total_train_data)) );
+// 	checkCudaErrors( cudaMemcpy(image_data_d, train_data, MSIZE(total_train_data), cudaMemcpyHostToDevice) );
 
-	value_type* image_data_d2 = NULL;
-	checkCudaErrors( cudaMalloc(&image_data_d2, MSIZE(total_test_data)) );	
-	checkCudaErrors( cudaMemcpy(image_data_d2, testing_data, MSIZE(total_test_data), cudaMemcpyHostToDevice) );
+// 	value_type* image_data_d2 = NULL;
+// 	checkCudaErrors( cudaMalloc(&image_data_d2, MSIZE(total_test_data)) );	
+// 	checkCudaErrors( cudaMemcpy(image_data_d2, testing_data, MSIZE(total_test_data), cudaMemcpyHostToDevice) );
 
-	// Try to load learned weights from file other wise start learning phase
-	if (fc1.load() && fc2.load())
-	{
-		fc1.copyDataToDevice();
-		fc2.copyDataToDevice();
-		println("Weights from file loaded");
-		// Testing Phase
-		{
-			print("\nTesting : ");
-			std::clock_t    start;
-			start = std::clock(); 
-			int correct = 0;
-			int n = total_test_data/N;
+// 	// Try to load learned weights from file other wise start learning phase
+// 	if (fc1.load() && fc2.load())
+// 	{
+// 		fc1.copyDataToDevice();
+// 		fc2.copyDataToDevice();
+// 		println("Weights from file loaded");
+// 		// Testing Phase
+// 		{
+// 			print("\nTesting : ");
+// 			std::clock_t    start;
+// 			start = std::clock(); 
+// 			int correct = 0;
+// 			int n = total_test_data/N;
 			
-			for (int i=0; i<n; i++){
-				value_type target = testing_target[i];
-				value_type predicted = mnist.predict_example(image_data_d2 + i*N, fc1, fc1act, fc2, fc2act);
+// 			for (int i=0; i<n; i++){
+// 				value_type target = testing_target[i];
+// 				value_type predicted = mnist.predict_example(image_data_d2 + i*N, fc1, fc1act, fc2, fc2act);
 				
-				if (target == predicted){
-					correct++;
-				}
-				if (!DEBUG && i%1000==0) print("."<<std::flush);
-				// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
-			}
-			println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
-			println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
-		}
-	}
-	else{
-		println("\n **** Learning started ****");
-		std::clock_t    start;
-		start = std::clock(); 
+// 				if (target == predicted){
+// 					correct++;
+// 				}
+// 				if (!DEBUG && i%1000==0) print("."<<std::flush);
+// 				// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+// 			}
+// 			println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
+// 			println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
+// 		}
+// 	}
+// 	else{
+// 		println("\n **** Learning started ****");
+// 		std::clock_t    start;
+// 		start = std::clock(); 
 
-		// Learn all examples till convergence
-		int max_iterations = 50, iterations = 0, best_correct = 0;
-		while(iterations++ < max_iterations ){ // TODO: Use a better convergence criteria
-			// Training Iteration
-			{
-				learning_rate = base_learning_rate*pow((1.0+base_gamma*(iterations-1)), -base_power);
-				print("learning rate: "<<learning_rate<<" ");
-				std::clock_t    start;
-				start = std::clock();
-				for (int i=0; i<m; i++){
-					if (DEBUG) print("\n\n\n\n\n");
-					value_type target = train_target[i];
-					value_type predicted = mnist.learn_example(image_data_d +i*N, fc1, fc1act, fc2, fc2act, target);
-					if (DEBUG) getchar();
-					else if (i%1000==0) print("."<<std::flush);
-					//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
-				}
-				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
-			}
+// 		// Learn all examples till convergence
+// 		int max_iterations = 50, iterations = 0, best_correct = 0;
+// 		while(iterations++ < max_iterations ){ // TODO: Use a better convergence criteria
+// 			// Training Iteration
+// 			{
+// 				learning_rate = base_learning_rate*pow((1.0+base_gamma*(iterations-1)), -base_power);
+// 				print("learning rate: "<<learning_rate<<" ");
+// 				std::clock_t    start;
+// 				start = std::clock();
+// 				for (int i=0; i<m; i++){
+// 					if (DEBUG) print("\n\n\n\n\n");
+// 					value_type target = train_target[i];
+// 					value_type predicted = mnist.learn_example(image_data_d +i*N, fc1, fc1act, fc2, fc2act, target);
+// 					if (DEBUG) getchar();
+// 					else if (i%1000==0) print("."<<std::flush);
+// 					//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+// 				}
+// 				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
+// 			}
 
-			// Testing Phase
-			{
-				print("\nTesting ("<<iterations<<") : ");
-				std::clock_t    start;
-				start = std::clock(); 
-				int correct = 0;
-				int n = total_test_data/N;
+// 			// Testing Phase
+// 			{
+// 				print("\nTesting ("<<iterations<<") : ");
+// 				std::clock_t    start;
+// 				start = std::clock(); 
+// 				int correct = 0;
+// 				int n = total_test_data/N;
 				
-				for (int i=0; i<n; i++){
-					value_type target = testing_target[i];
-					value_type predicted = mnist.predict_example(image_data_d2 + i*N, fc1, fc1act, fc2, fc2act);
+// 				for (int i=0; i<n; i++){
+// 					value_type target = testing_target[i];
+// 					value_type predicted = mnist.predict_example(image_data_d2 + i*N, fc1, fc1act, fc2, fc2act);
 					
-					if (target == predicted){
-						correct++;
-					}
-					if (!DEBUG && i%1000==0) print("."<<std::flush);
-					// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
-				}
-				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
-				println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
-				if (correct<best_correct){
-					println("Accuracy started to decrease. Stopping Learning!! "<<correct-best_correct<<" misclassified.");
-					break;
-				}
-				print("Correctly classified "<<(correct-best_correct)<<" new examples. ");
-				best_correct = correct;
-				fc1.copyDataToHost();
-				fc2.copyDataToHost();
-				// Save the weights in a binary file
-				if (fc1.save() && fc2.save())
-					println("Weights Saved.");
-			}
-		}
+// 					if (target == predicted){
+// 						correct++;
+// 					}
+// 					if (!DEBUG && i%1000==0) print("."<<std::flush);
+// 					// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+// 				}
+// 				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
+// 				println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
+// 				if (correct<best_correct){
+// 					println("Accuracy started to decrease. Stopping Learning!! "<<correct-best_correct<<" misclassified.");
+// 					break;
+// 				}
+// 				print("Correctly classified "<<(correct-best_correct)<<" new examples. ");
+// 				best_correct = correct;
+// 				fc1.copyDataToHost();
+// 				fc2.copyDataToHost();
+// 				// Save the weights in a binary file
+// 				if (fc1.save() && fc2.save())
+// 					println("Weights Saved.");
+// 			}
+// 		}
 		
-		println("\n **** Learning completed ****");
-		println("Total Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
-	}
-	checkCudaErrors( cudaFree(image_data_d2) );
-	checkCudaErrors( cudaFree(image_data_d) );
-
-}
+// 		println("\n **** Learning completed ****");
+// 		println("Total Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
+// 	}
+// 	checkCudaErrors( cudaFree(image_data_d2) );
+// 	checkCudaErrors( cudaFree(image_data_d) );
+// }
 
 
 /******************************************************************************
@@ -1997,10 +2012,10 @@ int main(int argc, char *argv[])
 	bool alexnet = true;
 	if (alexnet)
 	{
-		run_alexnet();
+		run_lenet();
 	} else 
 	{
-		run_mnist();
+		// run_mnist();
 	}
 
 	// Reset device and exit gracefully
