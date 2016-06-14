@@ -367,6 +367,16 @@ struct Layer_t
 		if (bias_d != NULL) 	checkCudaErrors( cudaFree(bias_d) );
 		if (output_d != NULL) 	checkCudaErrors( cudaFree(output_d) );
 		if (del_d != NULL) 		checkCudaErrors( cudaFree(del_d) );
+
+		if (layerType == CONV_LAYER){
+			destroyConvLayer();
+		} else if (layerType == POOL_LAYER){
+			destroyPoolLayer();
+		} else if (layerType == ACT_LAYER){
+			destroyActLayer();
+		} else if (layerType == FC_LAYER  || layerType == SOFTMAX_LAYER || layerType == NORM_LAYER){
+			destroyLayer();
+		}
 	}
 
 	size_t initConvLayer(std::string _layername, int _inputs, int _outputs, int _kernel_dim, int _in_height, int _in_width, int _d_size=0)
@@ -552,36 +562,15 @@ struct Layer_t
 		copyDataToDevice();
 	}
 
-	void initLayer(std::string _layername, LayerType _layerType, int _outputs){
-		layerType 	= _layerType;
-		layername 	= _layername;
-		inputs 		= _outputs;
-		outputs 	= _outputs;
-		kernel_dim 	= 1;
-		w_size 		= 0;
-		b_size 		= 0;
-		
-		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs)) );
-		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(inputs)) );
-
-		checkCUDNN( cudnnCreateActivationDescriptor(&activDesc) );
-		checkCUDNN( cudnnSetActivationDescriptor(activDesc,
-												CUDNN_ACTIVATION_SIGMOID,
-												CUDNN_PROPAGATE_NAN,
-												0.0) );
-
-		checkCUDNN( cudnnCreateTensorDescriptor(&actSrcTensorDesc) );
-		checkCUDNN( cudnnCreateTensorDescriptor(&actDstTensorDesc) );
-		checkCUDNN( cudnnCreateTensorDescriptor(&actSrcDiffTensorDesc) );
-		checkCUDNN( cudnnCreateTensorDescriptor(&actDstDiffTensorDesc) );
-
-		int n, c, h, w;
-		n = h = w = 1; c = inputs;
-		setTensorDesc(actSrcTensorDesc, tensorFormat, dataType, n, c, h, w);
-		setTensorDesc(actDstTensorDesc, tensorFormat, dataType, n, c, h, w);
-		setTensorDesc(actSrcDiffTensorDesc, tensorFormat, dataType, n, c, h, w);
-		setTensorDesc(actDstDiffTensorDesc, tensorFormat, dataType, n, c, h, w);
+	void initActLayer(std::string _layername, int _outputs){
+		initLayer(_layername, ACT_LAYER, _outputs);
 	}
+
+	void initSoftmaxLayer(std::string _layername, int _outputs){
+		initLayer(_layername, SOFTMAX_LAYER, _outputs);
+	}
+
+	
 
 	void destroyConvLayer(){
 		checkCUDNN(cudnnDestroyTensorDescriptor(convTensor));
@@ -598,12 +587,16 @@ struct Layer_t
 		checkCUDNN(cudnnDestroyPoolingDescriptor(poolDesc));
 	}
 
-	void destroyLayer(){
+	void destroyActLayer(){
 		checkCUDNN( cudnnDestroyActivationDescriptor(activDesc) );
 		checkCUDNN( cudnnDestroyTensorDescriptor(actSrcTensorDesc) );
 		checkCUDNN( cudnnDestroyTensorDescriptor(actDstTensorDesc) );
 		checkCUDNN( cudnnDestroyTensorDescriptor(actSrcDiffTensorDesc) );
 		checkCUDNN( cudnnDestroyTensorDescriptor(actDstDiffTensorDesc) );
+	}
+
+	void destroyLayer(){
+
 	}
 
 	void copyDataToDevice(){
@@ -650,6 +643,37 @@ struct Layer_t
 		}
 	}
 private:
+	void initLayer(std::string _layername, LayerType _layerType, int _outputs){
+		layerType 	= _layerType;
+		layername 	= _layername;
+		inputs 		= _outputs;
+		outputs 	= _outputs;
+		kernel_dim 	= 1;
+		w_size 		= 0;
+		b_size 		= 0;
+		
+		checkCudaErrors( cudaMalloc(&output_d, 	MSIZE(outputs)) );
+		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(inputs)) );
+
+		checkCUDNN( cudnnCreateActivationDescriptor(&activDesc) );
+		checkCUDNN( cudnnSetActivationDescriptor(activDesc,
+												CUDNN_ACTIVATION_SIGMOID,
+												CUDNN_PROPAGATE_NAN,
+												0.0) );
+
+		checkCUDNN( cudnnCreateTensorDescriptor(&actSrcTensorDesc) );
+		checkCUDNN( cudnnCreateTensorDescriptor(&actDstTensorDesc) );
+		checkCUDNN( cudnnCreateTensorDescriptor(&actSrcDiffTensorDesc) );
+		checkCUDNN( cudnnCreateTensorDescriptor(&actDstDiffTensorDesc) );
+
+		int n, c, h, w;
+		n = h = w = 1; c = inputs;
+		setTensorDesc(actSrcTensorDesc, tensorFormat, dataType, n, c, h, w);
+		setTensorDesc(actDstTensorDesc, tensorFormat, dataType, n, c, h, w);
+		setTensorDesc(actSrcDiffTensorDesc, tensorFormat, dataType, n, c, h, w);
+		setTensorDesc(actDstDiffTensorDesc, tensorFormat, dataType, n, c, h, w);
+	}
+
 	void readAllocInit(const char* fname, int size, value_type** data_h, value_type** data_d)
 	{
 		readAllocMemcpy<value_type>(fname, size, data_h, data_d);
@@ -1479,11 +1503,11 @@ void run_alexnet()
 	Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2);
 
 	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", (conv2.outputs*conv2.out_width*conv2.out_height) / (pool2.stride * pool2.stride), 500);
-	Layer_t<value_type> fc1act; fc1act.initLayer(	"fc1act", ACT_LAYER, fc1.outputs);
+	Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs);
 
 	Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", fc1act.outputs, 10);
 
-	Layer_t<value_type> fc2act; fc2act.initLayer(	"fc2act", ACT_LAYER, fc2.outputs);
+	Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs);
 
 	// Contains Training and Testing Examples
 	value_type *train_data, *testing_data;
@@ -1650,9 +1674,9 @@ void run_mnist()
 	network_t<value_type> alexnet;
 
 	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", N, 100);
-	Layer_t<value_type> fc1act; fc1act.initLayer(	"fc1act", ACT_LAYER, fc1.outputs);
+	Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs);
 	Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", fc1act.outputs, 10);
-	Layer_t<value_type> fc2act; fc2act.initLayer(	"fc2act", ACT_LAYER, fc2.outputs);
+	Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs);
 
 	// Contains Training and Testing Examples
 	value_type *train_data, *testing_data;
