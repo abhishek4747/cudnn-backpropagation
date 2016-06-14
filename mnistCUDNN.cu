@@ -139,20 +139,6 @@ void printDeviceVector(std::string str, int size, value_type* vec_d)
 	delete [] vec;
 }
 
-// Need the map, since scaling factor is of float type in half precision
-// Also when one needs to use float instead of half, e.g. for printing
-template <typename T> 
-struct ScaleFactorTypeMap { typedef T Type;};
-
-// float/double <-> half conversion class
-template <class value_type>
-class Convert
-{
-public:
-	template <class T>
-	value_type operator()(T x) {return value_type(x);}
-};
-
 // IO utils
 template <class value_type>
 void readBinaryFile(const char* fname, int size, value_type* data_h)
@@ -172,11 +158,10 @@ void readBinaryFile(const char* fname, int size, value_type* data_h)
 		error_s << "Error reading file " << fname; 
 		FatalError(error_s.str());
 	}
-	// conversion
-	Convert<value_type> fromReal;
+
 	for (int i = 0; i < size; i++)
 	{
-		data_h[i] = fromReal(data_tmp[i]);
+		data_h[i] = value_type(data_tmp[i]);
 	}
 	delete [] data_tmp;
 }
@@ -202,8 +187,6 @@ void readImage(const char* fname, value_type* imgData_h)
 	npp::ImageCPU_8u_C1 oHostSrc;
 	std::string sFilename(fname);
 	println("Loading image " << sFilename);
-	// Take care of half precision
-	Convert<value_type> fromReal;
 	// load gray-scale image from disk
 	try
 	{
@@ -219,7 +202,7 @@ void readImage(const char* fname, value_type* imgData_h)
 		for (int j = 0; j < IMAGE_W; j++)
 		{   
 			int idx = IMAGE_W*i + j;
-			imgData_h[idx] = fromReal(*(oHostSrc.data() + idx) / double(255));
+			imgData_h[idx] = value_type(*(oHostSrc.data() + idx) / double(255));
 		}
 	} 
 }
@@ -227,17 +210,15 @@ void readImage(const char* fname, value_type* imgData_h)
 template <class value_type>
 void printDeviceVector(int size, value_type* vec_d)
 {
-	typedef typename ScaleFactorTypeMap<value_type>::Type real_type;
 	value_type *vec;
 	vec = new value_type[size];
 	cudaDeviceSynchronize();
 	cudaMemcpy(vec, vec_d, MSIZE(size), cudaMemcpyDeviceToHost);
-	Convert<real_type> toReal;
 	std::cout.precision(5);
 	std::cout.setf( std::ios::fixed, std::ios::floatfield );
 	for (int i = 0; i < size; i++)
 	{
-		print(toReal(vec[i]) << " ");
+		print(value_type(vec[i]) << " ");
 	}
 	println(" ");
 	delete [] vec;
@@ -705,7 +686,6 @@ __global__ void getDiffDataD(int target, MATRIX_DATA_TYPE* diffData){
 template <class value_type>
 class network_t
 {
-	typedef typename ScaleFactorTypeMap<value_type>::Type scaling_type;
 	cudnnHandle_t cudnnHandle;
 	cublasHandle_t cublasHandle;
 
@@ -742,8 +722,8 @@ class network_t
 	
 	void addBias(const cudnnTensorDescriptor_t& dstTensorDesc, const Layer_t<value_type>& layer, int c, value_type *data)
 	{
-		scaling_type alpha = scaling_type(1);
-		scaling_type beta  = scaling_type(1);
+		value_type alpha = value_type(1);
+		value_type beta  = value_type(1);
 		checkCUDNN( cudnnAddTensor( cudnnHandle, 
 									&alpha, layer.convBiasTensor,
 									layer.bias_d,
@@ -765,7 +745,7 @@ class network_t
 		int dim_y = layer.outputs;
 		
 
-		scaling_type alpha = scaling_type(1), beta = scaling_type(1);
+		value_type alpha = value_type(1), beta = value_type(1);
 		
 		checkCudaErrors( cudaMemcpy(layer.output_d, layer.bias_d, MSIZE(dim_y), cudaMemcpyDeviceToDevice) );
 		
@@ -801,8 +781,8 @@ class network_t
 		{
 		  checkCudaErrors( cudaMalloc(&workSpace,sizeInBytes) );
 		}
-		scaling_type alpha = scaling_type(1);
-		scaling_type beta  = scaling_type(0);
+		value_type alpha = value_type(1);
+		value_type beta  = value_type(0);
 		checkCUDNN( cudnnConvolutionForward(cudnnHandle,
 											  &alpha,
 											  layer.srcTensorDesc,
@@ -870,8 +850,8 @@ class network_t
 
 	 	// println("pooling forward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		if (DEBUG) printDeviceVector("Pooling Input:\n", layer.inputs, layer.output_d);
-		scaling_type alpha = scaling_type(1);
-		scaling_type beta = scaling_type(0);
+		value_type alpha = value_type(1);
+		value_type beta = value_type(0);
 		checkCUDNN( cudnnPoolingForward(cudnnHandle,
 										  layer.poolDesc,
 										  &alpha,
@@ -909,8 +889,8 @@ class network_t
 	{
 		// println("softmaxForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 
-		scaling_type alpha = scaling_type(1);
-		scaling_type beta  = scaling_type(0);
+		value_type alpha = value_type(1);
+		value_type beta  = value_type(0);
 		checkCUDNN( cudnnSoftmaxForward(cudnnHandle,
 										  CUDNN_SOFTMAX_ACCURATE ,
 										  CUDNN_SOFTMAX_MODE_CHANNEL,
@@ -938,8 +918,8 @@ class network_t
 						value_type* diffData, value_type* srcData)
 	{
 		// println("softmaxBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-		scaling_type alpha = scaling_type(1);
-		scaling_type beta  = scaling_type(0);
+		value_type alpha = value_type(1);
+		value_type beta  = value_type(0);
 		checkCUDNN( cudnnSoftmaxBackward(cudnnHandle,
 										  CUDNN_SOFTMAX_ACCURATE ,
 										  CUDNN_SOFTMAX_MODE_CHANNEL,
@@ -968,8 +948,8 @@ class network_t
 		// setTensorDesc(srcTensorDesc, tensorFormat, dataType, n, c, h, w);
 		// setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);
 
-		// scaling_type alpha = scaling_type(1);
-		// scaling_type beta  = scaling_type(0);
+		// value_type alpha = value_type(1);
+		// value_type beta  = value_type(0);
 		// checkCUDNN( cudnnLRNCrossChannelForward(cudnnHandle,
 		// 									normDesc,
 		// 									CUDNN_LRN_CROSS_CHANNEL_DIM1,
@@ -986,8 +966,8 @@ class network_t
 	{
 		// println("activationForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 
-		scaling_type alpha = scaling_type(1);
-		scaling_type beta  = scaling_type(0);
+		value_type alpha = value_type(1);
+		value_type beta  = value_type(0);
 		checkCUDNN( cudnnActivationForward(cudnnHandle,
 											layer.activDesc,
 											&alpha,
@@ -1194,14 +1174,12 @@ class network_t
 
 		const int max_digits = fc2act.outputs;
 		
-		// Take care of half precision
-		Convert<scaling_type> toReal;
 		value_type result[max_digits];
 		checkCudaErrors( cudaMemcpy(result, fc2act.output_d, MSIZE(max_digits), cudaMemcpyDeviceToHost) );
 		int id = 0;
 		for (int i = 1; i < max_digits; i++)
 		{
-			if (toReal(result[id]) < toReal(result[i])) id = i;
+			if ((result[id]) < (result[i])) id = i;
 		}
 
 		return id;
@@ -1229,14 +1207,12 @@ class network_t
 
 		const int max_digits = fc2act.outputs;
 		
-		// Take care of half precision
-		Convert<scaling_type> toReal;
 		value_type result[max_digits];
 		checkCudaErrors( cudaMemcpy(result, fc2act.output_d, MSIZE(max_digits), cudaMemcpyDeviceToHost) );
 		int id = 0;
 		for (int i = 1; i < max_digits; i++)
 		{
-			if (toReal(result[id]) < toReal(result[i])) id = i;
+			if ((result[id]) < (result[i])) id = i;
 		}
 
 		return id;
