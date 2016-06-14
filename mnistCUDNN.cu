@@ -735,7 +735,7 @@ class network_t
 	}
 
 	void fullyConnectedForward(const Layer_t<value_type>& layer,
-						  int& n, int& c, int& h, int& w,
+						  int& n,
 						  value_type* srcData)
 	{
 		if (n != 1)
@@ -745,7 +745,7 @@ class network_t
 
 		// println("fullyConnectedforward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		
-		int dim_x = c*h*w;
+		int dim_x = layer.inputs;
 		int dim_y = layer.outputs;
 		
 		checkCudaErrors( cudaMemcpy(layer.output_d, layer.bias_d, MSIZE(dim_y), cudaMemcpyDeviceToDevice) );
@@ -758,14 +758,12 @@ class network_t
                                   &vOne,
                                   layer.output_d, 1) );    
 
-		h = 1; w = 1; c = dim_y;
 	}
 
 	void convoluteForward(const Layer_t<value_type>& layer,
-						  int& n, int& c, int& h, int& w,
+						  int& n, 
 						  value_type* srcData)
 	{
-		c = layer.outputs; h = layer.out_height; w = layer.out_width;
 
 		if (DEBUG) printDeviceVector("Conv Weights:\n", layer.w_size, layer.data_d);
 		if (DEBUG) printDeviceVector("Conv Bias:\n", layer.b_size, layer.bias_d);
@@ -795,7 +793,7 @@ class network_t
 											  &vZero,
 											  layer.dstTensorDesc,
 											  layer.output_d) );
-		addBias(layer.dstTensorDesc, layer, c, layer.output_d);
+		addBias(layer.dstTensorDesc, layer, layer.outputs, layer.output_d);
 		if (DEBUG) printDeviceVector("Conv Output:\n", layer.outputs*layer.out_height*layer.out_width, layer.output_d);
 		if (sizeInBytes!=0)
 		{
@@ -840,10 +838,9 @@ class network_t
 	}
 
 	void poolForward(const Layer_t<value_type>& layer,
-					  int& n, int& c, int& h, int& w,
+					  int& n, 
 					  value_type* srcData)
 	{
-	 	h /= layer.stride; w /= layer.stride;
 
 	 	// println("pooling forward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		if (DEBUG) printDeviceVector("Pooling Input:\n", layer.inputs, layer.output_d);
@@ -878,7 +875,7 @@ class network_t
 	}
 
 	void softmaxForward(const Layer_t<value_type>& layer, 
-						int &n, int &c, int &h, int &w, value_type* srcData)
+						int &n, value_type* srcData)
 	{
 		// println("softmaxForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 
@@ -923,7 +920,7 @@ class network_t
 	}
 
 	void activationForward(const Layer_t<value_type>& layer, 
-							int &n, int &c, int &h, int &w, value_type* srcData)
+							int &n, value_type* srcData)
 	{
 		// println("activationForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		checkCUDNN( cudnnActivationForward(cudnnHandle,
@@ -1103,25 +1100,25 @@ class network_t
 						const Layer_t<value_type>& fc2,
 						const Layer_t<value_type>& fc2act)
 	{
-		int n, c, h, w;
+		int n;
 		// if (DEBUG) println("Performing forward propagation ...");
 
-		n = c = 1; h = IMAGE_H; w = IMAGE_W;
+		n = 1;
 
-		convoluteForward(conv1, n, c, h, w, image_data_d);
-		poolForward(pool1, 		n, c, h, w, conv1.output_d);
+		convoluteForward(conv1, n, image_data_d);
+		poolForward(pool1, 		n, conv1.output_d);
 
-		convoluteForward(conv2, n, c, h, w, pool1.output_d);
-		poolForward(pool2, 		n, c, h, w, conv2.output_d);
+		convoluteForward(conv2, n, pool1.output_d);
+		poolForward(pool2, 		n, conv2.output_d);
 
-		fullyConnectedForward(fc1, 	n, c, h, w, pool2.output_d);
-		activationForward(fc1act, 	n, c, h, w, fc1.output_d);
+		fullyConnectedForward(fc1, 	n, pool2.output_d);
+		activationForward(fc1act, 	n, fc1.output_d);
 		
-		// lrnForward(n, c, h, w, srcData, &dstData);
+		// lrnForward(n, srcData, &dstData);
 
-		fullyConnectedForward(fc2, 	n, c, h, w, fc1act.output_d);
-		activationForward(fc2act, 	n, c, h, w, fc2.output_d);
-		// softmaxForward(fc2act, 	n, c, h, w, fc2.output_d);
+		fullyConnectedForward(fc2, 	n, fc1act.output_d);
+		activationForward(fc2act, 	n, fc2.output_d);
+		// softmaxForward(fc2act, 	n, fc2.output_d);
 
 		const int max_digits = fc2act.outputs;
 		
@@ -1135,7 +1132,7 @@ class network_t
 
 		return id;
 	}
-
+	/*
 	int predict_example(value_type* image_data_d,
 						const Layer_t<value_type>& fc1,
 						const Layer_t<value_type>& fc1act,
@@ -1168,6 +1165,7 @@ class network_t
 
 		return id;
 	}
+	*/
 
 	int learn_example(value_type* image_data_d, 
 						const Layer_t<value_type>& conv1,
@@ -1218,7 +1216,7 @@ class network_t
 		checkCudaErrors( cudaFree(diffData) );
 		return id;
 	}
-
+	/*
 	int learn_example(value_type* image_data_d, 
 						const Layer_t<value_type>& fc1,
 						const Layer_t<value_type>& fc1act,
@@ -1255,6 +1253,7 @@ class network_t
 		checkCudaErrors( cudaFree(diffData) );
 		return id;
 	}
+	*/
 
 	static void load_mnist_data(value_type **training_data, value_type **testing_data,
 		 value_type **training_target, value_type **testing_target,
