@@ -802,7 +802,7 @@ class network_t
 	}
 
 	void convoluteBackward(const Layer_t<value_type>& layer,
-							int& n, int& c, int& h, int& w,
+							int& n,
 							value_type* diffData)
 	{
 		// println("convoluteBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
@@ -856,7 +856,7 @@ class network_t
 	}
 
 	void poolBackward(const Layer_t<value_type>& layer,
-						int& n, int& c, int& h, int& w,
+						int& n,
 						value_type* diffData, value_type* srcData)
 	{
 		// println("poolingback::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
@@ -902,7 +902,7 @@ class network_t
 	}
 
 	void softmaxBackward(const Layer_t<value_type>& layer, 
-						int &n, int &c, int &h, int &w, 						
+						int &n, 
 						value_type* diffData, value_type* srcData)
 	{
 		// println("softmaxBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
@@ -934,7 +934,7 @@ class network_t
 	}
 
 	void fullyConnectedBackward(const Layer_t<value_type>& layer,
-								int &n, int &c, int &h, int &w, value_type* srcData)
+								int &n, value_type* srcData)
 	{
 		// println("fullyConnectedBack::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		checkCudaErrors( CUBLAS_GEMV(cublasHandle, CUBLAS_OP_N,
@@ -944,11 +944,10 @@ class network_t
 									  srcData, 1,
 									  &vZero,
 									  layer.del_d, 1) );
-		c = layer.inputs;
 	}
 
 	void activationBackward(const Layer_t<value_type>& layer,
-							int &n, int &c, int &h, int &w, 
+							int &n, 
 							value_type *srcDiffData, value_type* srcData)
 	{
 		// println("activationBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
@@ -1178,12 +1177,12 @@ class network_t
 						const Layer_t<value_type>& fc2act,
 						int target)
 	{
-		int n,c,h,w;
+		int n,c;
 		
 		int id = predict_example(image_data_d, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act);
 
 		//if (DEBUG) println("Performing backward propagation ...");
-		n = h = w = 1; c = fc2act.outputs;
+		n = 1; c = fc2act.outputs;
 
 		value_type *diffData = NULL;
 		resize(c, &diffData);
@@ -1192,18 +1191,18 @@ class network_t
 		getDiffDataD<<<1, c>>>(target, diffData);
 		cudaDeviceSynchronize();
 
-		activationBackward(fc2act,	n, c, h, w, diffData, fc2.output_d);
-		// softmaxBackward(fc2act,		n, c, h, w, diffData, fc2.output_d);
-		fullyConnectedBackward(fc2, n, c, h, w, fc2act.del_d);
+		activationBackward(fc2act,	n, diffData, fc2.output_d);
+		// softmaxBackward(fc2act,		n, diffData, fc2.output_d);
+		fullyConnectedBackward(fc2, n, fc2act.del_d);
 
-		activationBackward(fc1act, 	n, c, h, w, fc2.del_d, fc1.output_d);
-		fullyConnectedBackward(fc1, n, c, h, w, fc1act.del_d);		
+		activationBackward(fc1act, 	n, fc2.del_d, fc1.output_d);
+		fullyConnectedBackward(fc1, n, fc1act.del_d);		
 
 
-		poolBackward(pool2,			n, c, h, w, fc1.del_d, conv2.output_d);
-		convoluteBackward(conv2,	n, c, h, w, pool2.del_d);
+		poolBackward(pool2,			n, fc1.del_d, conv2.output_d);
+		convoluteBackward(conv2,	n, pool2.del_d);
 
-		poolBackward(pool1,			n, c, h, w, conv2.del_d, conv1.output_d);
+		poolBackward(pool1,			n, conv2.del_d, conv1.output_d);
 
 
 		// Update Weights
@@ -1662,7 +1661,7 @@ void run_lenet()
 			// Training Iteration
 			{
 				learning_rate = base_learning_rate*pow((1.0+base_gamma*(iterations-1)), -base_power);
-				print("learning rate: "<<learning_rate<<" ");
+				print("\n\nLearning ("<<iterations<<") rate: "<<learning_rate<<" ");
 				std::clock_t    start;
 				start = std::clock();
 				for (int i=0; i<m; i++){
