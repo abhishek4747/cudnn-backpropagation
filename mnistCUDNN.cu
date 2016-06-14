@@ -533,7 +533,7 @@ struct Layer_t
 												convBwdFilterAlgo,
 												&convBwdFilterSizeInBytes));
 
-  		println("handles: "<<(int)convFwdAlgo<<" "<<(int)convBwdDataAlgo<<" "<<(int)convBwdFilterAlgo);
+  		//println("handles: "<<(int)convFwdAlgo<<" "<<(int)convBwdDataAlgo<<" "<<(int)convBwdFilterAlgo);
 
         checkCUDNN( cudnnDestroy(cudnnHandle) );
 
@@ -584,7 +584,7 @@ struct Layer_t
 		copyDataToDevice();
 	}
 
-	void initPoolLayer(std::string _layername, int _size, int _stride, const Layer_t<value_type>& conv)
+	void initPoolLayer(std::string _layername, int _size, int _stride, Layer_t<value_type>& conv)
 	{
 		layerType 	= POOL_LAYER;
 		layername 	= _layername;
@@ -790,7 +790,7 @@ class network_t
 		checkCudaErrors( cudaMalloc(data, MSIZE(size)) );
 	}
 	
-	void addBias(const cudnnTensorDescriptor_t& convDstTensorDesc, const Layer_t<value_type>& layer, int c, value_type *data)
+	void addBias(const cudnnTensorDescriptor_t& convDstTensorDesc, Layer_t<value_type>& layer, int c, value_type *data)
 	{
 		checkCUDNN( cudnnAddTensor( cudnnHandle, 
 									&vOne, 
@@ -801,7 +801,7 @@ class network_t
 									data) );
 	}
 
-	void fullyConnectedForward(const Layer_t<value_type>& layer,
+	void fullyConnectedForward(Layer_t<value_type>& layer,
 						  int& n,
 						  value_type* srcData)
 	{
@@ -809,6 +809,8 @@ class network_t
 		{
 			FatalError("Not Implemented"); 
 		}
+
+		layer.setHandles(n);
 
 		
 		int dim_x = layer.inputs;
@@ -826,10 +828,11 @@ class network_t
 
 	}
 
-	void convoluteForward(const Layer_t<value_type>& layer,
+	void convoluteForward(Layer_t<value_type>& layer,
 						  int& n, 
 						  value_type* srcData)
 	{
+		layer.setHandles(n);
 
 		if (DEBUG) printDeviceVector("Conv Weights:\n", layer.w_size, layer.data_d);
 		if (DEBUG) printDeviceVector("Conv Bias:\n", layer.b_size, layer.bias_d);
@@ -859,7 +862,7 @@ class network_t
 		}
 	}
 
-	void convoluteBackward(const Layer_t<value_type>& layer,
+	void convoluteBackward(Layer_t<value_type>& layer,
 							int& n,
 							value_type* diffData)
 	{
@@ -884,11 +887,11 @@ class network_t
 		}
 	}
 
-	void poolForward(const Layer_t<value_type>& layer,
+	void poolForward(Layer_t<value_type>& layer,
 					  int& n, 
 					  value_type* srcData)
 	{
-
+		layer.setHandles(n);
 
 		if (DEBUG) printDeviceVector("Pooling Input:\n", layer.inputs, layer.output_d);
 		checkCUDNN( cudnnPoolingForward(cudnnHandle,
@@ -902,7 +905,7 @@ class network_t
 		if (DEBUG) printDeviceVector("Pooling Output:\n", layer.outputs, layer.output_d);
 	}
 
-	void poolBackward(const Layer_t<value_type>& layer,
+	void poolBackward(Layer_t<value_type>& layer,
 						int& n,
 						value_type* diffData, value_type* srcData)
 	{
@@ -920,10 +923,10 @@ class network_t
 
 	}
 
-	void softmaxForward(const Layer_t<value_type>& layer, 
+	void softmaxForward(Layer_t<value_type>& layer, 
 						int &n, value_type* srcData)
 	{
-
+		layer.setHandles(n);
 		checkCUDNN( cudnnSoftmaxForward(cudnnHandle,
 										  CUDNN_SOFTMAX_ACCURATE ,
 										  CUDNN_SOFTMAX_MODE_CHANNEL,
@@ -935,7 +938,7 @@ class network_t
 										  layer.output_d) );
 	}
 
-	void getDiffData(const Layer_t<value_type>& layer, int target, value_type** diffData){
+	void getDiffData(Layer_t<value_type>& layer, int target, value_type** diffData){
 		resize(layer.outputs, diffData);
 		value_type outputh[layer.outputs];
 		checkCudaErrors( cudaMemcpy(outputh, layer.output_d, MSIZE(layer.outputs), cudaMemcpyDeviceToHost) );
@@ -946,7 +949,7 @@ class network_t
 		checkCudaErrors( cudaMemcpy(*diffData, outputh, MSIZE(layer.outputs), cudaMemcpyHostToDevice) );
 	}
 
-	void softmaxBackward(const Layer_t<value_type>& layer, 
+	void softmaxBackward(Layer_t<value_type>& layer, 
 						int &n, 
 						value_type* diffData, value_type* srcData)
 	{
@@ -963,9 +966,10 @@ class network_t
 										  layer.del_d) );
 	}
 
-	void activationForward(const Layer_t<value_type>& layer, 
+	void activationForward(Layer_t<value_type>& layer, 
 							int &n, value_type* srcData)
 	{
+		layer.setHandles(n);
 		checkCUDNN( cudnnActivationForward(cudnnHandle,
 											layer.activDesc,
 											&vOne,
@@ -976,7 +980,7 @@ class network_t
 											layer.output_d) );    
 	}
 
-	void fullyConnectedBackward(const Layer_t<value_type>& layer,
+	void fullyConnectedBackward(Layer_t<value_type>& layer,
 								int &n, value_type* srcData)
 	{
 		checkCudaErrors( CUBLAS_GEMV(cublasHandle, CUBLAS_OP_N,
@@ -988,7 +992,7 @@ class network_t
 									  layer.del_d, 1) );
 	}
 
-	void activationBackward(const Layer_t<value_type>& layer,
+	void activationBackward(Layer_t<value_type>& layer,
 							int &n, 
 							value_type *srcDiffData, value_type* srcData)
 	{
@@ -1007,7 +1011,7 @@ class network_t
 											) );    
 	}
 
-	void fullyConnectedUpdateWeights(const Layer_t<value_type>& layer, value_type* diffData, value_type* srcData){
+	void fullyConnectedUpdateWeights(Layer_t<value_type>& layer, value_type* diffData, value_type* srcData){
 		int dim_x = layer.inputs;
 		int dim_y = layer.outputs;
 		int dim_z = 1;
@@ -1064,7 +1068,7 @@ class network_t
 		checkCudaErrors( cudaFree(dstData));
 	}
 
-	void convolutionalUpdateWeights(const Layer_t<value_type>& layer, value_type* diffData, value_type* srcData)
+	void convolutionalUpdateWeights(Layer_t<value_type>& layer, value_type* diffData, value_type* srcData)
 	{
 
 		if (DEBUG) println("Convolutional Update Weights:");
@@ -1123,14 +1127,14 @@ class network_t
 	}
 
 	int predict_example(value_type* image_data_d, 
-						const Layer_t<value_type>& conv1,
-						const Layer_t<value_type>& pool1,
-						const Layer_t<value_type>& conv2,
-						const Layer_t<value_type>& pool2,
-						const Layer_t<value_type>& fc1,
-						const Layer_t<value_type>& fc1act,
-						const Layer_t<value_type>& fc2,
-						const Layer_t<value_type>& fc2act)
+						Layer_t<value_type>& conv1,
+						Layer_t<value_type>& pool1,
+						Layer_t<value_type>& conv2,
+						Layer_t<value_type>& pool2,
+						Layer_t<value_type>& fc1,
+						Layer_t<value_type>& fc1act,
+						Layer_t<value_type>& fc2,
+						Layer_t<value_type>& fc2act)
 	{
 		int n;
 		// if (DEBUG) println("Performing forward propagation ...");
@@ -1145,8 +1149,6 @@ class network_t
 
 		fullyConnectedForward(fc1, 	n, pool2.output_d);
 		activationForward(fc1act, 	n, fc1.output_d);
-		
-		// lrnForward(n, srcData, &dstData);
 
 		fullyConnectedForward(fc2, 	n, fc1act.output_d);
 		activationForward(fc2act, 	n, fc2.output_d);
@@ -1166,10 +1168,10 @@ class network_t
 	}
 	/*
 	int predict_example(value_type* image_data_d,
-						const Layer_t<value_type>& fc1,
-						const Layer_t<value_type>& fc1act,
-						const Layer_t<value_type>& fc2,
-						const Layer_t<value_type>& fc2act)
+						Layer_t<value_type>& fc1,
+						Layer_t<value_type>& fc1act,
+						Layer_t<value_type>& fc2,
+						Layer_t<value_type>& fc2act)
 	{
 		int n, c, h, w;
 		// if (DEBUG) println("Performing forward propagation ...");
@@ -1200,14 +1202,14 @@ class network_t
 	*/
 
 	int learn_example(value_type* image_data_d, 
-						const Layer_t<value_type>& conv1,
-						const Layer_t<value_type>& pool1,
-						const Layer_t<value_type>& conv2,
-						const Layer_t<value_type>& pool2,
-						const Layer_t<value_type>& fc1,
-						const Layer_t<value_type>& fc1act,
-						const Layer_t<value_type>& fc2,
-						const Layer_t<value_type>& fc2act,
+						Layer_t<value_type>& conv1,
+						Layer_t<value_type>& pool1,
+						Layer_t<value_type>& conv2,
+						Layer_t<value_type>& pool2,
+						Layer_t<value_type>& fc1,
+						Layer_t<value_type>& fc1act,
+						Layer_t<value_type>& fc2,
+						Layer_t<value_type>& fc2act,
 						int target)
 	{
 		int n,c;
@@ -1250,10 +1252,10 @@ class network_t
 	}
 	/*
 	int learn_example(value_type* image_data_d, 
-						const Layer_t<value_type>& fc1,
-						const Layer_t<value_type>& fc1act,
-						const Layer_t<value_type>& fc2,
-						const Layer_t<value_type>& fc2act,
+						Layer_t<value_type>& fc1,
+						Layer_t<value_type>& fc1act,
+						Layer_t<value_type>& fc2,
+						Layer_t<value_type>& fc2act,
 						int target)
 	{
 		int n,c,h,w;
