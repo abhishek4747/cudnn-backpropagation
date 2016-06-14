@@ -706,39 +706,23 @@ template <class value_type>
 class network_t
 {
 	typedef typename ScaleFactorTypeMap<value_type>::Type scaling_type;
-	int convAlgorithm;
-	cudnnDataType_t dataType;
-	cudnnTensorFormat_t tensorFormat;
 	cudnnHandle_t cudnnHandle;
-	cudnnLRNDescriptor_t   normDesc;
 	cublasHandle_t cublasHandle;
 
 	void createHandles()
 	{
 		checkCUDNN( cudnnCreate(&cudnnHandle) );
-		checkCUDNN( cudnnCreateLRNDescriptor(&normDesc) );
-	
 		checkCublasErrors( cublasCreate(&cublasHandle) );
 	}
 
 	void destroyHandles()
 	{
-		checkCUDNN( cudnnDestroyLRNDescriptor(normDesc) );
 		checkCUDNN( cudnnDestroy(cudnnHandle) );
-
 		checkCublasErrors( cublasDestroy(cublasHandle) );
 	}
   public:
 	network_t()
 	{
-		convAlgorithm = -1;
-		switch (sizeof(value_type))
-		{
-			case 4 : dataType = CUDNN_DATA_FLOAT; break;
-			case 8 : dataType = CUDNN_DATA_DOUBLE; break;
-			default : FatalError("Unsupported data type");
-		}
-		tensorFormat = CUDNN_TENSOR_NCHW;
 		createHandles();    
 	};
 
@@ -754,11 +738,6 @@ class network_t
 			checkCudaErrors( cudaFree(*data) );
 		}
 		checkCudaErrors( cudaMalloc(data, MSIZE(size)) );
-	}
-	
-	void setConvolutionAlgorithm(const cudnnConvolutionFwdAlgo_t& algo)
-	{
-		convAlgorithm = (int) algo;
 	}
 	
 	void addBias(const cudnnTensorDescriptor_t& dstTensorDesc, const Layer_t<value_type>& layer, int c, value_type *data)
