@@ -657,7 +657,7 @@ private:
 
 		checkCUDNN( cudnnCreateActivationDescriptor(&activDesc) );
 		checkCUDNN( cudnnSetActivationDescriptor(activDesc,
-												CUDNN_ACTIVATION_SIGMOID,
+												CUDNN_ACTIVATION_RELU, //CUDNN_ACTIVATION_SIGMOID,
 												CUDNN_PROPAGATE_NAN,
 												0.0) );
 
@@ -699,13 +699,8 @@ class network_t
 	cudnnDataType_t dataType;
 	cudnnTensorFormat_t tensorFormat;
 	cudnnHandle_t cudnnHandle;
-	cudnnTensorDescriptor_t srcTensorDesc, dstTensorDesc, biasTensorDesc, srcDiffTensorDesc, dstDiffTensorDesc;
-	cudnnFilterDescriptor_t filterDesc;
-	cudnnConvolutionDescriptor_t convDesc;
-	cudnnPoolingDescriptor_t     poolingDesc;
 	cudnnLRNDescriptor_t   normDesc;
 	cublasHandle_t cublasHandle;
-	cudnnConvolutionFwdAlgo_t convAlgo;
 
 	void createHandles()
 	{
@@ -713,7 +708,6 @@ class network_t
 		checkCUDNN( cudnnCreateLRNDescriptor(&normDesc) );
 	
 		checkCublasErrors( cublasCreate(&cublasHandle) );
-		convAlgo = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;
 	}
 
 	void destroyHandles()
@@ -758,12 +752,10 @@ class network_t
 	
 	void addBias(const cudnnTensorDescriptor_t& dstTensorDesc, const Layer_t<value_type>& layer, int c, value_type *data)
 	{
-		setTensorDesc(biasTensorDesc, tensorFormat, dataType, 1, c, 1, 1);
-
 		scaling_type alpha = scaling_type(1);
 		scaling_type beta  = scaling_type(1);
 		checkCUDNN( cudnnAddTensor( cudnnHandle, 
-									&alpha, biasTensorDesc,
+									&alpha, layer.convBiasTensor,
 									layer.bias_d,
 									&beta,
 									dstTensorDesc,
@@ -925,10 +917,7 @@ class network_t
 	void softmaxForward(const Layer_t<value_type>& layer, 
 						int &n, int &c, int &h, int &w, value_type* srcData)
 	{
-		// resize(n*c*h*w, &(layer.output_d));
 		// println("softmaxForward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-		setTensorDesc(srcTensorDesc, tensorFormat, dataType, n, c, h, w);
-		setTensorDesc(dstTensorDesc, tensorFormat, dataType, n, c, h, w);
 
 		scaling_type alpha = scaling_type(1);
 		scaling_type beta  = scaling_type(0);
@@ -936,10 +925,10 @@ class network_t
 										  CUDNN_SOFTMAX_ACCURATE ,
 										  CUDNN_SOFTMAX_MODE_CHANNEL,
 										  &alpha,
-										  srcTensorDesc,
+										  layer.actSrcTensorDesc,
 										  srcData,
 										  &beta,
-										  dstTensorDesc,
+										  layer.actDstTensorDesc,
 										  layer.output_d) );
 	}
 
@@ -959,42 +948,18 @@ class network_t
 						value_type* diffData, value_type* srcData)
 	{
 		// println("softmaxBackward::\tn:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
-		checkCUDNN( cudnnSetTensor4dDescriptor(srcTensorDesc,
-												tensorFormat,
-												dataType,
-												n, c,
-												h,
-												w) );
-		checkCUDNN( cudnnSetTensor4dDescriptor(dstTensorDesc,
-												tensorFormat,
-												dataType,
-												n, c,
-												h,
-												w) );
-		checkCUDNN( cudnnSetTensor4dDescriptor(srcDiffTensorDesc,
-												tensorFormat,
-												dataType,
-												n, c,
-												h,
-												w) );
-		checkCUDNN( cudnnSetTensor4dDescriptor(dstDiffTensorDesc,
-												tensorFormat,
-												dataType,
-												n, c,
-												h,
-												w) );
 		scaling_type alpha = scaling_type(1);
 		scaling_type beta  = scaling_type(0);
 		checkCUDNN( cudnnSoftmaxBackward(cudnnHandle,
 										  CUDNN_SOFTMAX_ACCURATE ,
 										  CUDNN_SOFTMAX_MODE_CHANNEL,
 										  &alpha,
-										  srcTensorDesc,
+										  layer.actSrcTensorDesc,
 										  layer.output_d,
-										  srcDiffTensorDesc,
+										  layer.actSrcDiffTensorDesc,
 										  diffData,
 										  &beta,
-										  dstTensorDesc,
+										  layer.actDstTensorDesc,
 										  layer.del_d) );
 	}
 	void lrnForward(int &n, int &c, int &h, int &w, value_type* srcData, value_type** dstData)
@@ -1269,8 +1234,8 @@ class network_t
 		// lrnForward(n, c, h, w, srcData, &dstData);
 
 		fullyConnectedForward(fc2, 	n, c, h, w, fc1act.output_d);
-		activationForward(fc2act, 	n, c, h, w, fc2.output_d);
-		// softmaxForward(fc2act, 	n, c, h, w, fc2.output_d);
+		// activationForward(fc2act, 	n, c, h, w, fc2.output_d);
+		softmaxForward(fc2act, 	n, c, h, w, fc2.output_d);
 
 		const int max_digits = fc2act.outputs;
 		
@@ -1358,8 +1323,8 @@ class network_t
 		getDiffDataD<<<1, c>>>(target, diffData);
 		cudaDeviceSynchronize();
 
-		activationBackward(fc2act,	n, c, h, w, diffData, fc2.output_d);
-		// softmaxBackward(fc2act,		n, c, h, w, diffData, fc2.output_d);
+		// activationBackward(fc2act,	n, c, h, w, diffData, fc2.output_d);
+		softmaxBackward(fc2act,		n, c, h, w, diffData, fc2.output_d);
 		fullyConnectedBackward(fc2, n, c, h, w, fc2act.del_d);
 
 		activationBackward(fc1act, 	n, c, h, w, fc2.del_d, fc1.output_d);
@@ -1668,9 +1633,9 @@ void run_mnist()
 {
 	typedef MATRIX_DATA_TYPE value_type;
 	// Define and initialize network
-	const double base_learning_rate = 0.1;
-	const double base_gamma = 0.1;
-	const double base_power = 1;
+	const double base_learning_rate = 0.01;
+	const double base_gamma = 0.0001;
+	const double base_power = 0.75;
 	network_t<value_type> alexnet;
 
 	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", N, 100);
@@ -1853,7 +1818,7 @@ int main(int argc, char *argv[])
 
 	srand(time(NULL));
 
-	bool alexnet = true;
+	bool alexnet = false;
 	if (alexnet)
 	{
 		run_alexnet();
