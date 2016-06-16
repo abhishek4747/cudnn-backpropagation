@@ -1732,7 +1732,31 @@ void run_mnist()
 	checkCudaErrors( cudaFree(image_data_d) );
 }
 
+void readJPGImage(std::string jpgfile, MATRIX_DATA_TYPE* imageData_h){
+	FIBITMAP *bitmap = FreeImage_Load(FIF_JPEG, jpgfile.c_str(), JPEG_ACCURATE);
 
+	if (bitmap) {
+		// Allocate a raw buffer
+		int width = FreeImage_GetWidth(bitmap);
+		int height = FreeImage_GetHeight(bitmap);
+		int scan_width = FreeImage_GetPitch(bitmap);
+		BYTE *bits = (BYTE*)malloc(height * scan_width);
+		int c = scan_width/width;
+		int d = 8*c;
+		println(width<<" "<<height<<" "<<scan_width<<" "<<c<<" "<<d);
+		// convert the bitmap to raw bits (top-left pixel first)
+		FreeImage_ConvertToRawBits(bits, bitmap, scan_width, d, FI_RGBA_RED_MASK, FI_RGBA_GREEN_MASK, FI_RGBA_BLUE_MASK, TRUE);
+
+		for (int i=0; i<c; i++){
+			for (int j=0; j<height; j++){
+				for (int k=0; k<width; k++){
+					imageData_h[width*height*i + j*width + k] = bits[j*scan_width + k*c + i]/255.0;
+				}
+			}
+		}
+		FreeImage_Unload(bitmap);
+	}
+}
 /******************************************************************************
  * MAIN() function
  *****************************************************************************/
@@ -1745,33 +1769,49 @@ int main(int argc, char *argv[])
 		displayUsage();
 		exit(EXIT_WAIVED); 
 	}
+	
 
-	// Print Library and Device stats
-	int version = (int)cudnnGetVersion();
-	printf("\n\nCuDNN Version : %d , CUDNN_VERSION from cudnn.h : %d (%s)\n", version, CUDNN_VERSION, CUDNN_VERSION_STR);
-	printf("Host compiler version : %s %s\r", COMPILER_NAME, COMPILER_VER);
-	showDevices();
+	MATRIX_DATA_TYPE imageData_h[255*255*3];
+	std::string jpgfile("/home/abhishek/Desktop/partition/dataset/bval/ILSVRC2010_val_00008001.JPEG");
 
-	// If device argument is provided then set device (device=1)
-	int device = 0;
-	if (checkCmdLineFlag(argc, (const char **)argv, "device"))
-	{
-		device = getCmdLineArgumentInt(argc, (const char **)argv, "device");
-		checkCudaErrors( cudaSetDevice(device) );
+	readJPGImage(jpgfile, imageData_h);
+	
+	for (int i=0; i<3; i++){
+		println(i<<": \n");
+		for (int j=0; j<4; j++){
+			for (int k=0; k<4; k++){
+				print((int)(imageData_h[255*255*i + j*255 + k]*255)<<" ");
+			}
+			println(" ");
+		}
 	}
-	println("Using device " << device);
+
+	// // Print Library and Device stats
+	// int version = (int)cudnnGetVersion();
+	// printf("\n\nCuDNN Version : %d , CUDNN_VERSION from cudnn.h : %d (%s)\n", version, CUDNN_VERSION, CUDNN_VERSION_STR);
+	// printf("Host compiler version : %s %s\r", COMPILER_NAME, COMPILER_VER);
+	// showDevices();
+
+	// // If device argument is provided then set device (device=1)
+	// int device = 0;
+	// if (checkCmdLineFlag(argc, (const char **)argv, "device"))
+	// {
+	// 	device = getCmdLineArgumentInt(argc, (const char **)argv, "device");
+	// 	checkCudaErrors( cudaSetDevice(device) );
+	// }
+	// println("Using device " << device);
 
 
-	srand(time(NULL));
+	// srand(time(NULL));
 
-	bool alexnet = false;
-	if (alexnet)
-	{
-		run_lenet();
-	} else 
-	{
-		run_mnist();
-	}
+	// bool alexnet = false;
+	// if (alexnet)
+	// {
+	// 	run_lenet();
+	// } else 
+	// {
+	// 	run_mnist();
+	// }
 
 	// Reset device and exit gracefully
 	cudaDeviceReset();
