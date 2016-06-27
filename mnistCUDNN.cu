@@ -849,22 +849,22 @@ class network_t
   		//                          layer.output_d, 1) );    
 
 		// Forward propagate neurons using weights (fc1 = pfc1'*pool2)
-        checkCudaErrors(CUBLAS_GEMM(cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N,
-                                    n, layer.outputs, layer.inputs,
+        checkCudaErrors(CUBLAS_GEMM(cublasHandle, CUBLAS_OP_T, CUBLAS_OP_N,
+                                    layer.outputs, n, layer.inputs,
                                     &vOne,
-                                    srcData, n,
                                     layer.data_d, layer.inputs,
+                                    srcData, layer.inputs,
                                     &vZero,
-                                    layer.output_d, n));
+                                    layer.output_d, layer.outputs));
         // printDeviceVector("One Vector:\n", n, layer.oneVec_d);
         // Add bias using GEMM's "beta" (fc1 += pfc1bias*1_vec')
         checkCudaErrors(CUBLAS_GEMM(cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N,
-                                    n, layer.outputs, 1,
+                                    layer.outputs, n, 1,
                                     &vOne,
-                                    layer.oneVec_d, n,
-                                    layer.bias_d, 1,
+                                    layer.bias_d, layer.outputs,
+                                    layer.oneVec_d, 1,
                                     &vOne,
-                                    layer.output_d, n));
+                                    layer.output_d, layer.outputs));
 
 	}
 
@@ -1031,13 +1031,13 @@ class network_t
 		// 							  &vZero,
 		// 							  layer.del_d, 1) );
 
-		checkCudaErrors( CUBLAS_GEMM(cublasHandle, CUBLAS_OP_N, CUBLAS_OP_T,
-									  n, layer.inputs, layer.outputs,
+		checkCudaErrors( CUBLAS_GEMM(cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N,
+									  layer.inputs, n, layer.outputs,
 									  &vOne,
-									  srcData, n,
 									  layer.data_d, layer.inputs,
+									  srcData, layer.outputs,
 									  &vZero,
-									  layer.del_d, n) );
+									  layer.del_d, layer.inputs) );
 	}
 
 	void activationBackward(Layer_t<value_type>& layer,
@@ -1059,25 +1059,22 @@ class network_t
 											) );    
 	}
 
-	void fullyConnectedUpdateWeights(Layer_t<value_type>& layer, value_type* diffData, value_type* srcData, int _batch_size){
-		int dim_x = layer.inputs;
-		int dim_y = layer.outputs;
-		int dim_z = _batch_size;
+	void fullyConnectedUpdateWeights(Layer_t<value_type>& layer, value_type* diffData, value_type* srcData, int n){
 		value_type* dstData = NULL;
-		resize(dim_x*dim_y, &dstData);
+		resize(layer.inputs*layer.outputs, &dstData);
 		value_type lr = value_type(-learning_rate); // learning rate
 
 		//if (DEBUG) printDeviceVector("last_input: \n", layer.inputs, last_input);
 		//if (DEBUG) printDeviceVector("del_W: \n", layer.outputs, layer.del_d);
 		
 		checkCudaErrors( CUBLAS_GEMM(cublasHandle, 
-									  CUBLAS_OP_T, CUBLAS_OP_T,
-									  dim_x, dim_y, dim_z,
+									  CUBLAS_OP_N, CUBLAS_OP_T,
+									  layer.inputs, layer.outputs, n,
 									  &vOne,
-									  srcData, dim_z,
-									  diffData, dim_y,
+									  srcData, layer.inputs,
+									  diffData, layer.outputs,
 									  &vZero,
-									  dstData, dim_x) );
+									  dstData, layer.inputs) );
 
 		// if (DEBUG) printDeviceVector("\tdelta_W (del_W*hidden_input): \n", layer.inputs*layer.outputs, dstData);
 
@@ -1085,52 +1082,44 @@ class network_t
 		const value_type* B = layer.data_d;
 		// C = α op ( A ) + β * C
 		// C = 0.1 * delta_W2 + C
-		// if (DEBUG) printDeviceVector("\tW = W + 0.1*delta_W: old\n", dim_x*dim_y, layer.data_d);
+		// if (DEBUG) printDeviceVector("\tW = W + 0.1*delta_W: old\n", layer.inputs*layer.outputs, layer.data_d);
 		
 		checkCudaErrors( CUBLAS_GEAM(cublasHandle,
 										CUBLAS_OP_N, CUBLAS_OP_N,
-										dim_x, dim_y,
+										layer.inputs, layer.outputs,
 										&lr,
-										dstData, dim_x,
+										dstData, layer.inputs,
 										&vOne,
-										B, dim_x,
-										layer.data_d, dim_x) );
-		// if (DEBUG) printDeviceVector("\tW: \n", dim_x*dim_y, layer.data_d);
+										B, layer.inputs,
+										layer.data_d, layer.inputs) );
+		// if (DEBUG) printDeviceVector("\tW: \n", layer.inputs*layer.outputs, layer.data_d);
 
-		// printDeviceVector("\n yo \n", dim_y, diffData, dim_z);
-		// printDeviceVector("\n ones \n", dim_z, layer.oneVec_d);
-		resize(dim_y, &dstData);
-		// checkCudaErrors( CUBLAS_GEMV(cublasHandle, 
-		// 							CUBLAS_OP_T, 
-		// 							dim_z, dim_y,
-  //                                   &vOne, 
-  //                                   diffData, dim_z, 
-  //                                   layer.oneVec_d, 1, 
-  //                                   &vZero, 
-  //                                   dstData, 1));
-		checkCudaErrors( CUBLAS_GEMM(cublasHandle,
-										CUBLAS_OP_N, CUBLAS_OP_T,
-										1, dim_y, dim_z,
-										&vOne,
-										layer.oneVec_d, 1,
-										diffData, dim_y,
-										&vZero,
-										dstData, 1));
-		// printDeviceVector("\n sum \n", dim_y, dstData);
+		// printDeviceVector("\n yo \n", layer.outputs, diffData, n);
+		// printDeviceVector("\n ones \n", n, layer.oneVec_d);
+		resize(layer.outputs, &dstData);
+
+		checkCudaErrors( CUBLAS_GEMV(cublasHandle, 
+										CUBLAS_OP_N, 
+										layer.outputs, n,
+                                    	&vOne, 
+                                    	diffData, layer.outputs, 
+                                    	layer.oneVec_d, 1, 
+                                    	&vZero, 
+                                    	dstData, 1));
+		// printDeviceVector("\n sum \n", layer.outputs, dstData);
 
 		// place bias into dstData
-		dim_x = 1;
 		const value_type* B2 = layer.bias_d;
 		// if (DEBUG) printDeviceVector("\tdel_W:\n", layer.outputs, layer.del_d);
 		// if (DEBUG) printDeviceVector("\tB = B + 0.1*del_W: old\n", layer.outputs, layer.bias_d);
 		checkCudaErrors( CUBLAS_GEAM(cublasHandle,
 										CUBLAS_OP_N, CUBLAS_OP_N,
-										dim_x, dim_y,
+										1, layer.outputs,
 										&lr,
-										dstData, dim_x,
+										dstData, 1,
 										&vOne,
-										B2, dim_x,
-										layer.bias_d, dim_x) );
+										B2, 1,
+										layer.bias_d, 1) );
 		// if (DEBUG) printDeviceVector("\tB:\n", layer.outputs, layer.bias_d);
 
 		checkCudaErrors( cudaFree(dstData));
@@ -1670,7 +1659,7 @@ void run_mnist()
 	const double base_learning_rate = 0.01;
 	const double base_gamma = 0.0001;
 	const double base_power = 0.75;
-	const int batch_size = 1;
+	const int batch_size = 2;
 
 	network_t<value_type> mnist;
 	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", 		N, 			100, 	batch_size);
