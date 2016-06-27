@@ -410,6 +410,7 @@ struct Layer_t
 		c = kernel_dim; h=in_height; w=in_width;
 		setTensorDesc(poolSrcTensorDesc, tensorFormat, dataType, n, c, h, w);        
 
+		println("pool in >> n:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		const int tensorDims = 4;
 		int tensorOuputDimA[tensorDims] = {n,c,h,w};
 		checkCUDNN( cudnnGetPoolingNdForwardOutputDim(poolDesc,
@@ -419,6 +420,7 @@ struct Layer_t
 		n = tensorOuputDimA[0]; c = tensorOuputDimA[1];
 		h = tensorOuputDimA[2]; w = tensorOuputDimA[3];
 
+		println("pool out >> n:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
 		out_height = h;
 		out_width  = w;
 		
@@ -461,6 +463,7 @@ struct Layer_t
 		int h = in_height;
 		int w = in_width;
 
+		println("conv in >> n:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
         checkCUDNN(cudnnSetTensor4dDescriptor(convSrcTensorDesc,
                                               tensorFormat,
                                               dataType,
@@ -493,6 +496,7 @@ struct Layer_t
         out_width 	= w;			
 		out_height 	= h;
 
+		println("conv out >> n:"<<n<<"\tc:"<<c<<"\th:"<<h<<"\tw:"<<w);
         checkCUDNN(cudnnSetTensor4dDescriptor(convDstTensorDesc,
                                               tensorFormat,
                                               dataType,
@@ -1478,7 +1482,7 @@ void run_lenet()
 	const int batch_size = 8;
 	
 	network_t<value_type> lenet;
-	Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, 1, IMAGE_H, IMAGE_W, batch_size);
+	Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, 1, IMAGE_H, IMAGE_W, 0, batch_size);
 	Layer_t<value_type> pool1; 	pool1.initPoolLayer("pool1", 2, 2, conv1, 		batch_size);
 	Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", pool1.kernel_dim, 50, 5, 1, pool1.out_width, pool1.out_height, pool1.outputs, batch_size);
 	Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2, 		batch_size);
@@ -1625,7 +1629,7 @@ void run_lenet()
 					if (i+batch_size<=n){
 						value_type* target = testing_target+i;
 						value_type predicted[batch_size];
-						lenet.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted);
+						lenet.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted, batch_size);
 						
 						for (int j=0; j<batch_size; j++)
 							if (target[j] == predicted[j]){
@@ -1641,7 +1645,7 @@ void run_lenet()
 				println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
 				if (correct<best_correct){
 					println("Accuracy started to decrease. Stopping Learning!! "<<correct-best_correct<<" misclassified.");
-					break;
+					// break;
 				}
 				print("Correctly classified "<<(correct-best_correct)<<" new examples. ");
 				best_correct = correct;
