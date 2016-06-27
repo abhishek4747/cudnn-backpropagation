@@ -476,10 +476,8 @@ struct Layer_t
         checkCUDNN(cudnnSetFilter4dDescriptor(convFilterDesc,
                                               dataType,
                                               tensorFormat,
-                                              outputs,
-                                              inputs, 
-											  kernel_dim,
-											  kernel_dim));
+                                              outputs, inputs, 
+											  kernel_dim, kernel_dim));
  
         checkCUDNN(cudnnSetConvolution2dDescriptor(convDesc,
                                                    0, 0,	//	padding
@@ -1477,7 +1475,7 @@ void run_lenet()
 	const double base_learning_rate = 0.01;
 	const double base_gamma = 0.001;
 	const double base_power = 0.75;
-	const int batch_size = 1;
+	const int batch_size = 4;
 	
 	network_t<value_type> lenet;
 	Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, 1, IMAGE_H, IMAGE_W, batch_size);
@@ -1672,7 +1670,7 @@ void run_mnist()
 	const double base_learning_rate = 0.01;
 	const double base_gamma = 0.0001;
 	const double base_power = 0.75;
-	const int batch_size = 4;
+	const int batch_size = 16;
 
 	network_t<value_type> mnist;
 	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", 		N, 			100, 	batch_size);
@@ -1747,16 +1745,21 @@ void run_mnist()
 			start = std::clock(); 
 			int correct = 0;
 			
-			for (int i=0; i<n; i++){
-				value_type target = testing_target[i];
-				value_type predicted = 0;
-				mnist.predict_example(testing_data_d + i*N, fc1, fc1act, fc2, fc2act, &predicted);
-				
-				if (target == predicted){
-					correct++;
+			for (int i=0; i<n; i+=batch_size){
+				if (i+batch_size<=m){
+					value_type* target = testing_target+i;
+					value_type predicted[batch_size];
+					mnist.predict_example(testing_data_d + i*N, fc1, fc1act, fc2, fc2act, predicted, batch_size);
+					
+					for (int j = 0; j < batch_size; ++j)
+						if (target[j] == predicted[j]){
+							correct++;
+						}
+					if (!DEBUG && i%1000==0) print("."<<std::flush);
+					// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+				}else{
+					println("Skipping "<<(n-i)<<" examples.");
 				}
-				if (!DEBUG && i%1000==0) print("."<<std::flush);
-				// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
 			}
 			println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
 			println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
@@ -1904,7 +1907,7 @@ int main(int argc, char *argv[])
 
 	srand(time(NULL));
 
-	bool alexnet = true;
+	bool alexnet = false;
 	if (alexnet)
 	{
 		run_lenet();
