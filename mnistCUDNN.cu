@@ -495,7 +495,6 @@ struct Layer_t
         out_width 	= w;			
 		out_height 	= h;
 
-
         checkCUDNN(cudnnSetTensor4dDescriptor(convDstTensorDesc,
                                               tensorFormat,
                                               dataType,
@@ -573,7 +572,7 @@ struct Layer_t
 		checkCudaErrors( cudaMalloc(&del_d, 	MSIZE(n*d_size)) );
 	}
 
-	void initConvLayer(std::string _layername, int _inputs, int _outputs, int _kernel_dim, int _stride, int _in_height, int _in_width, int _d_size=0)
+	void initConvLayer(std::string _layername, int _inputs, int _outputs, int _kernel_dim, int _stride, int _in_height, int _in_width, int _d_size=0, int _batch_size=1)
 	{
 		layerType 	= CONV_LAYER;
 		layername 	= _layername;
@@ -604,12 +603,12 @@ struct Layer_t
 		checkCUDNN(cudnnCreateConvolutionDescriptor(&convDesc));
 		checkCUDNN(cudnnCreateTensorDescriptor(&convBiasTensorDesc));
 
-		setHandles(1);
+		setHandles(_batch_size);
 
 		copyDataToDevice();
 	}
 
-	void initPoolLayer(std::string _layername, int _size, int _stride, Layer_t<value_type>& conv)
+	void initPoolLayer(std::string _layername, int _size, int _stride, Layer_t<value_type>& conv, int _batch_size=1)
 	{
 		layerType 	= POOL_LAYER;
 		layername 	= _layername;
@@ -630,7 +629,7 @@ struct Layer_t
 											   0, 0,
 											   stride, stride));
 
-		setHandles(1);
+		setHandles(_batch_size);
 	}
 
 	void initFCLayer(std::string _layername, int _inputs, int _outputs, int _batch_size=1)
@@ -1183,7 +1182,7 @@ class network_t
 		if (DEBUG) getchar();
 	}
 
-	/*
+	
 	void predict_example(value_type* image_data_d, 
 						Layer_t<value_type>& conv1,
 						Layer_t<value_type>& pool1,
@@ -1193,7 +1192,7 @@ class network_t
 						Layer_t<value_type>& fc1act,
 						Layer_t<value_type>& fc2,
 						Layer_t<value_type>& fc2act,
-						int *predictions,
+						value_type *predictions,
 						int _batch_size=1)
 	{
 		int n = _batch_size;
@@ -1221,11 +1220,11 @@ class network_t
 			predictions[batch] = 0;
 			for (int i = 1; i < max_digits; i++)
 			{
-				if ((result[predictions[batch]]) < (result[i])) predictions[batch] = i;
+				if ((result[(int)predictions[batch]]) < (result[i])) predictions[batch] = i;
 			}
 		}	
 	}
-	*/
+	
 
 	void predict_example(value_type* image_data_d,
 						Layer_t<value_type>& fc1,
@@ -1259,7 +1258,7 @@ class network_t
 		}	
 	}
 
-	/*
+	
 	void learn_example(value_type* image_data_d, 
 						Layer_t<value_type>& conv1,
 						Layer_t<value_type>& pool1,
@@ -1269,7 +1268,7 @@ class network_t
 						Layer_t<value_type>& fc1act,
 						Layer_t<value_type>& fc2,
 						Layer_t<value_type>& fc2act,
-						int* targets,
+						value_type* targets,
 						int _batch_size=1)
 	{
 		int n,c;
@@ -1283,11 +1282,14 @@ class network_t
 		//if (DEBUG) println("Performing backward propagation ...");
 
 		value_type *diffData = NULL;
-		resize(c, &diffData);
-		checkCudaErrors( cudaMemcpy(diffData, fc2act.output_d, MSIZE(c), cudaMemcpyDeviceToDevice) );
-		// getDiffData(fc2act, target, &diffData);
-		getDiffDataD<<<1, c>>>(target, diffData);
+		resize(n*c, &diffData);
+		checkCudaErrors( cudaMemcpy(diffData, fc2act.output_d, MSIZE(n*c), cudaMemcpyDeviceToDevice) );
+		
+		getDiffDataD<<<1, n>>>(targets, diffData, c, n);
 		cudaDeviceSynchronize();
+
+		value_type scalVal = 1.0f / static_cast<value_type>(n);
+		checkCudaErrors(CUBLAS_SCAL(cublasHandle, n * c, &scalVal, diffData, 1));
 
 		activationBackward(fc2act,	n, diffData, fc2.output_d);
 		// softmaxBackward(fc2act,		n, diffData, fc2.output_d);
@@ -1304,15 +1306,14 @@ class network_t
 
 
 		// Update Weights
-		fullyConnectedUpdateWeights(fc2, fc2act.del_d, fc1act.output_d);
-		fullyConnectedUpdateWeights(fc1, fc1act.del_d,  pool1.output_d);
+		fullyConnectedUpdateWeights(fc2, fc2act.del_d, fc1act.output_d, n);
+		fullyConnectedUpdateWeights(fc1, fc1act.del_d,  pool1.output_d, n);
 
 		convolutionalUpdateWeights(conv2, pool2.del_d, pool1.output_d);
 		convolutionalUpdateWeights(conv1, pool1.del_d, image_data_d);
 
 		checkCudaErrors( cudaFree(diffData) );
 	}
-	*/
 	
 	void learn_example(value_type* image_data_d, 
 						Layer_t<value_type>& fc1,
@@ -1468,33 +1469,25 @@ void readImageToDevice(const char* fname, value_type **image_data_d){
 	checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, MSIZE(N), cudaMemcpyHostToDevice) );
 }
 
-/*
+
 void run_lenet()
 {
 	typedef MATRIX_DATA_TYPE value_type;
-	
 	// Define and initialize network
 	const double base_learning_rate = 0.01;
 	const double base_gamma = 0.001;
 	const double base_power = 0.75;
+	const int batch_size = 1;
 	
 	network_t<value_type> lenet;
-
-	Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, 1, IMAGE_H, IMAGE_W);
-
-	Layer_t<value_type> pool1; 	pool1.initPoolLayer("pool1", 2, 2, conv1);
-
-	Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", pool1.kernel_dim, 50, 5, 1, pool1.out_width, pool1.out_height, pool1.outputs);
-
-	Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2);
-
-	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", pool2.outputs, 500);
-
-	Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs);
-
-	Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", fc1act.outputs, 10);
-
-	Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs);
+	Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, 1, IMAGE_H, IMAGE_W, batch_size);
+	Layer_t<value_type> pool1; 	pool1.initPoolLayer("pool1", 2, 2, conv1, 		batch_size);
+	Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", pool1.kernel_dim, 50, 5, 1, pool1.out_width, pool1.out_height, pool1.outputs, batch_size);
+	Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2, 		batch_size);
+	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", pool2.outputs, 500, 	batch_size);
+	Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs, 		batch_size);
+	Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", fc1act.outputs, 10, 	batch_size);
+	Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs, 		batch_size);
 
 	// Contains Training and Testing Examples
 	value_type *train_data, *testing_data;
@@ -1536,13 +1529,18 @@ void run_lenet()
 	for (int i=0; i<total_test_data; i++)
 		testing_data[i] /= 255;
 
-	value_type* image_data_d = NULL;
-	checkCudaErrors( cudaMalloc(&image_data_d, MSIZE(total_train_data)) );
-	checkCudaErrors( cudaMemcpy(image_data_d, train_data, MSIZE(total_train_data), cudaMemcpyHostToDevice) );
+	// Copy training and testing data to device memory
+	value_type* train_data_d = NULL;
+	checkCudaErrors( cudaMalloc(&train_data_d, MSIZE(total_train_data)) );
+	checkCudaErrors( cudaMemcpy(train_data_d, train_data, MSIZE(total_train_data), cudaMemcpyHostToDevice) );
 
-	value_type* image_data_d2 = NULL;
-	checkCudaErrors( cudaMalloc(&image_data_d2, MSIZE(total_test_data)) );	
-	checkCudaErrors( cudaMemcpy(image_data_d2, testing_data, MSIZE(total_test_data), cudaMemcpyHostToDevice) );
+	value_type* testing_data_d = NULL;
+	checkCudaErrors( cudaMalloc(&testing_data_d, MSIZE(total_test_data)) );	
+	checkCudaErrors( cudaMemcpy(testing_data_d, testing_data, MSIZE(total_test_data), cudaMemcpyHostToDevice) );
+
+	value_type* train_target_d = NULL;
+	checkCudaErrors( cudaMalloc(&train_target_d, MSIZE(m)) );	
+	checkCudaErrors( cudaMemcpy(train_target_d, train_target, MSIZE(m), cudaMemcpyHostToDevice) );
 
 	// Try to load learned weights from file other wise start learning phase
 	if (conv1.load() && conv2.load() && fc1.load() && fc2.load())
@@ -1560,15 +1558,21 @@ void run_lenet()
 			int correct = 0;
 			int n = total_test_data/N;
 			
-			for (int i=0; i<n; i++){
-				value_type target = testing_target[i];
-				value_type predicted = lenet.predict_example(image_data_d2 + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act);
-				
-				if (target == predicted){
-					correct++;
+			for (int i=0; i<n; i+=batch_size){
+				if (i+batch_size<=n){
+					value_type* target = testing_target+i;
+					value_type predicted[batch_size];
+					lenet.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted);
+					
+					for (int j=0; j<batch_size; j++)
+						if (target[j] == predicted[j]){
+							correct++;
+						}
+					if (!DEBUG && i%1000==0) print("."<<std::flush);
+					// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+				}else{
+					println("Skipping "<<(n-i)<<" examples.");	
 				}
-				if (!DEBUG && i%1000==0) print("."<<std::flush);
-				// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
 			}
 			println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
 			println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
@@ -1588,13 +1592,17 @@ void run_lenet()
 				print("\n\nLearning ("<<iterations<<") rate: "<<learning_rate<<" ");
 				std::clock_t    start;
 				start = std::clock();
-				for (int i=0; i<m; i++){
-					if (DEBUG) print("\n\n\n\n\n");
-					value_type target = train_target[i];
-					value_type predicted = lenet.learn_example(image_data_d +i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, target);
-					if (DEBUG) getchar();
-					else if (i%1000==0) print("."<<std::flush);
-					//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+				for (int i=0; i<m; i+=batch_size){
+					if (i+batch_size<=m){
+						if (DEBUG) print("\n\n\n\n\n");
+						value_type* targets = train_target_d+i;
+						lenet.learn_example(train_data_d +i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, targets, batch_size);
+						if (DEBUG) getchar();
+						else if (i%1000==0) print("."<<std::flush);
+						//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+					}else{
+						println("Skipping "<<(m-i)<<" examples.");
+					}
 				}
 				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
 			}
@@ -1615,15 +1623,21 @@ void run_lenet()
 				int correct = 0;
 				int n = total_test_data/N;
 				
-				for (int i=0; i<n; i++){
-					value_type target = testing_target[i];
-					value_type predicted = lenet.predict_example(image_data_d2 + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act);
-					
-					if (target == predicted){
-						correct++;
+				for (int i=0; i<n; i+=batch_size){
+					if (i+batch_size<=n){
+						value_type* target = testing_target+i;
+						value_type predicted[batch_size];
+						lenet.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted);
+						
+						for (int j=0; j<batch_size; j++)
+							if (target[j] == predicted[j]){
+								correct++;
+							}
+						if (!DEBUG && i%1000==0) print("."<<std::flush);
+						// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+					}else{
+						println("Skipping "<<(n-i)<<" examples.");	
 					}
-					if (!DEBUG && i%1000==0) print("."<<std::flush);
-					// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
 				}
 				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
 				println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
@@ -1646,10 +1660,9 @@ void run_lenet()
 		println("\n **** Learning completed ****");
 		println("Learning Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
 	}
-	checkCudaErrors( cudaFree(image_data_d2) );
-	checkCudaErrors( cudaFree(image_data_d) );
+	checkCudaErrors( cudaFree(testing_data_d) );
+	checkCudaErrors( cudaFree(train_data_d) );
 }
-*/
 
 
 void run_mnist()
@@ -1659,7 +1672,7 @@ void run_mnist()
 	const double base_learning_rate = 0.01;
 	const double base_gamma = 0.0001;
 	const double base_power = 0.75;
-	const int batch_size = 2;
+	const int batch_size = 4;
 
 	network_t<value_type> mnist;
 	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", 		N, 			100, 	batch_size);
@@ -1722,7 +1735,7 @@ void run_mnist()
 	checkCudaErrors( cudaMemcpy(train_target_d, train_target, MSIZE(m), cudaMemcpyHostToDevice) );
 
 	// Try to load learned weights from file other wise start learning phase
-	if (fc1.load() && fc2.load() && false)
+	if (fc1.load() && fc2.load())
 	{
 		fc1.copyDataToDevice();
 		fc2.copyDataToDevice();
@@ -1891,10 +1904,10 @@ int main(int argc, char *argv[])
 
 	srand(time(NULL));
 
-	bool alexnet = false;
+	bool alexnet = true;
 	if (alexnet)
 	{
-		// run_lenet();
+		run_lenet();
 	} else 
 	{
 		run_mnist();
