@@ -1475,7 +1475,7 @@ void run_lenet()
 	const double base_learning_rate = 0.01;
 	const double base_gamma = 0.001;
 	const double base_power = 0.75;
-	const int batch_size = 4;
+	const int batch_size = 8;
 	
 	network_t<value_type> lenet;
 	Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, 1, IMAGE_H, IMAGE_W, batch_size);
@@ -1560,7 +1560,7 @@ void run_lenet()
 				if (i+batch_size<=n){
 					value_type* target = testing_target+i;
 					value_type predicted[batch_size];
-					lenet.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted);
+					lenet.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted, batch_size);
 					
 					for (int j=0; j<batch_size; j++)
 						if (target[j] == predicted[j]){
@@ -1907,7 +1907,7 @@ int main(int argc, char *argv[])
 
 	srand(time(NULL));
 
-	bool alexnet = false;
+	bool alexnet = true;
 	if (alexnet)
 	{
 		run_lenet();
