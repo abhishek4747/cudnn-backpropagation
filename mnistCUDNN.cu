@@ -1,7 +1,7 @@
 /**
-* Copyright 2014 NVIDIA Corporation.  All rights reserved.
+* Copyright 2016 Abhishek Kumar. All rights reserved.
 *
-* Please refer to the NVIDIA end user license agreement (EULA) associated
+* Please refer to the Abhishek Kumar end user license agreement (EULA) associated
 * with this source code for terms and conditions that govern your use of
 * this software. Any use, reproduction, disclosure, or distribution of
 * this software and related documentation outside the terms of the EULA
@@ -10,18 +10,20 @@
 */
 
 /*
- * This example demonstrates how to use CUDNN library to implement forward
- * pass. The sample loads weights and biases from trained network,
- * takes a few images of digits and recognizes them. The network was trained on 
- * the MNIST dataset using Caffe. The network consists of two 
- * convolution layers, two pooling layers, one relu and two 
- * fully connected layers. Final layer gets processed by Softmax. 
- * cublasSgemv is used to implement fully connected layers.
-
- * The sample can work in single, double, but it
- * assumes the data in files is stored in single precision
+ * This code implements forward propagation and backward propagation on
+ * convolutional layer, pooling layer, fully connected layer, activation layer 
+ * and softmax layer. This code learns randomly initialzed weights and then 
+ * stores them into binary files. The network architecture is generic and hence 
+ * this code can be use to create, train and test neural network of any size or
+ * depth. Code supports both float and double precision and it saves the weights 
+ * accordingly.
  */
 
+/******************************************************************************
+ * HEADER FILES
+ *****************************************************************************/
+
+// Standard header files for standard functions
 #include <sstream>
 #include <fstream>
 #include <stdlib.h>
@@ -30,19 +32,19 @@
 #include <iomanip>
 #include <ctime>
 
-#include <cuda.h> // need CUDA_VERSION
-#include <cudnn.h>
-#include <cublas_v2.h>
+#include <cuda.h> 			// CUDA_VERSION
+#include <cudnn.h>			// cuDNN routines
+#include <cublas_v2.h>		// cublas routines
 
-#include "ImageIO.h"
-#include "error_util.h"
+#include "ImageIO.h"		// FreeImage library for reading jpg images
+#include "error_util.h"		// Contains error handling functions
 
 /******************************************************************************
  * MACROS
  *****************************************************************************/
 
 // #define MATRIX_DATA_TYPE_FLOAT
-#define MATRIX_DATA_TYPE_DOUBLE
+#define MATRIX_DATA_TYPE_DOUBLE		// Use double precision
 
 #ifdef MATRIX_DATA_TYPE_FLOAT
 #define MATRIX_DATA_TYPE float
@@ -56,6 +58,7 @@
 #error "MATRIX_DATA_TYPE not defined"
 #endif
 
+// Handle both precisions in cublas calls
 #if defined(MATRIX_DATA_TYPE_FLOAT)
 	#define CUBLAS_GEMM cublasSgemm
  	#define CUBLAS_GEAM cublasSgeam
@@ -68,17 +71,23 @@
  	#define CUBLAS_SCAL cublasDscal
 #endif
 
+// MSIZE returns the byte size
 #define MSIZE(a) ((a)*sizeof(value_type))
 
+
+// Define Input Dimensions
 #define IMAGE_H (28)
 #define IMAGE_W (28)
 #define N (IMAGE_H*IMAGE_W)  // dimension of training data
 
+
+// Define 2 args and 3 args max, min functions
 #define minn(a,b) (a<b?a:b)
 #define maxx(a,b) (a>b?a:b)
 #define minnn(a,b,c) (minn(minn(a,b),c))
 #define maxxx(a,b,c) (maxx(maxx(a,b),c))
 
+// Define logging functions
 //#define print(a) (std::cout<<std::setprecision(0)<<std::fixed<<a)
 #define print(a) (std::cout<<std::fixed<<a)
 #define println(a) (print(a<<std::endl<<std::flush))
@@ -105,11 +114,14 @@
 #define EXIT_WAIVED 0
 
 /******************************************************************************
- * CONSTANTS
+ * CONSTANTS AND GLOBALS
  *****************************************************************************/
 
+// save and load weights from this path
 const std::string weights_folder = "bins/";
-double learning_rate = 0.1;
+
+// global learning rate which decreases with epochs
+double learning_rate;
 
 /******************************************************************************
  * HELPER FUNCTIONS for classes
@@ -1461,6 +1473,75 @@ class network_t
  	#define FFNET 100
 #endif
 
+
+#ifdef LENET
+ 	#define BASE_GAMMA (0.001)
+ 	
+ 	#define NETWORK_ARCH			\
+ 		Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, 1, IMAGE_H, IMAGE_W, 0, batch_size);	\
+		Layer_t<value_type> pool1; 	pool1.initPoolLayer("pool1", 2, 2, conv1, 		batch_size);				\
+		Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", pool1.kernel_dim, 50, 5, 1, pool1.out_width, pool1.out_height, pool1.outputs, batch_size);		\
+		Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2, 		batch_size);				\
+		Layer_t<value_type> fc1;	fc1.initFCLayer    ("fc1", pool2.outputs, 500, 	batch_size);				\
+		Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs, 		batch_size);				\
+		Layer_t<value_type> fc2; 	fc2.initFCLayer    ("fc2", fc1act.outputs, 10, 	batch_size);				\
+		Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs, 		batch_size);				\
+	
+	#define LOAD_DATA (conv1.load() && conv2.load() && fc1.load() && fc2.load())
+
+	#define SAVE_DATA (conv1.save() && conv2.save() && fc1.save() && fc2.save())
+
+	#define COPY_DATA_TO_DEVICE		\
+		conv1.copyDataToDevice();	\
+		conv2.copyDataToDevice();	\
+		fc1.copyDataToDevice();		\
+		fc2.copyDataToDevice();		\
+
+	#define COPY_DATA_TO_HOST		\
+		conv1.copyDataToHost();		\
+		conv2.copyDataToHost();		\
+		fc1.copyDataToHost();		\
+		fc2.copyDataToHost();		\
+
+	#define PREDICT_EXMAPLE 		\
+		mnist.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted, batch_size);
+
+	#define LEARN_EXAMPLE 			\
+		mnist.learn_example(train_data_d +i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, targets, batch_size);
+		
+#endif
+ 	
+
+
+#ifdef FFNET
+ 	#define BASE_GAMMA (0.0001)
+	
+	#define NETWORK_ARCH			\
+		Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", 		N, 			FFNET, 	batch_size);			\
+		Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", 	fc1.outputs, 		batch_size);			\
+		Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", 		fc1act.outputs, 10, batch_size);			\
+		Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", 	fc2.outputs, 		batch_size);			\
+
+	#define LOAD_DATA (fc1.load() && fc2.load())
+
+	#define SAVE_DATA (fc1.save() && fc2.save())
+
+	#define COPY_DATA_TO_DEVICE		\
+		fc1.copyDataToDevice();		\
+		fc2.copyDataToDevice();		\
+
+	#define COPY_DATA_TO_HOST		\
+		fc1.copyDataToHost();		\
+		fc2.copyDataToHost();		\
+
+	#define PREDICT_EXMAPLE 		\
+		mnist.predict_example(testing_data_d + i*N, fc1, fc1act, fc2, fc2act, predicted, batch_size);
+
+	#define LEARN_EXAMPLE 			\
+		mnist.learn_example(train_data_d +i*N, fc1, fc1act, fc2, fc2act, targets, batch_size);
+
+#endif
+
 void displayUsage()
 {
 	println( "mnistCUDNN {<options>}");
@@ -1483,30 +1564,11 @@ void run_mnist()
 	// Define and initialize network
 	const double base_learning_rate = 0.01;
 	const double base_power = 0.75;
-	const int batch_size = 64;
-	#ifdef LENET
-		const double base_gamma = 0.001;
-	#else
-		const double base_gamma = 0.0001;
-	#endif
+	const int batch_size = 32;
+	const double base_gamma = BASE_GAMMA;
 
 	network_t<value_type> mnist;
-
-	#ifdef LENET
-		Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, 1, IMAGE_H, IMAGE_W, 0, batch_size);
-		Layer_t<value_type> pool1; 	pool1.initPoolLayer("pool1", 2, 2, conv1, 		batch_size);
-		Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", pool1.kernel_dim, 50, 5, 1, pool1.out_width, pool1.out_height, pool1.outputs, batch_size);
-		Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2, 		batch_size);
-		Layer_t<value_type> fc1;	fc1.initFCLayer    ("fc1", pool2.outputs, 500, 	batch_size);
-		Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs, 		batch_size);
-		Layer_t<value_type> fc2; 	fc2.initFCLayer    ("fc2", fc1act.outputs, 10, 	batch_size);
-		Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs, 		batch_size);
-	#else
-		Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", 		N, 			100, 	batch_size);
-		Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", 	fc1.outputs, 		batch_size);
-		Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", 		fc1act.outputs, 10, batch_size);
-		Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", 	fc2.outputs, 		batch_size);
-	#endif
+	NETWORK_ARCH
 
 	// Contains Training and Testing Examples
 	value_type *train_data, *testing_data;
@@ -1563,18 +1625,10 @@ void run_mnist()
 	checkCudaErrors( cudaMemcpy(train_target_d, train_target, MSIZE(m), cudaMemcpyHostToDevice) );
 
 	// Try to load learned weights from file other wise start learning phase
-	if (
-		#ifdef LENET
-		conv1.load() && conv2.load() &&
-		#endif
-		fc1.load() && fc2.load())
+	if (LOAD_DATA)
 	{
-		#ifdef LENET
-			conv1.copyDataToDevice();
-			conv2.copyDataToDevice();
-		#endif
-		fc1.copyDataToDevice();
-		fc2.copyDataToDevice();
+		COPY_DATA_TO_DEVICE
+
 		println("Weights from file loaded");
 		// Testing Phase
 		{
@@ -1587,11 +1641,8 @@ void run_mnist()
 				if (i+batch_size<=m){
 					value_type* target = testing_target+i;
 					value_type predicted[batch_size];
-					#ifdef LENET
-						mnist.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted, batch_size);
-					#else
-						mnist.predict_example(testing_data_d + i*N, fc1, fc1act, fc2, fc2act, predicted, batch_size);
-					#endif
+					
+					PREDICT_EXMAPLE
 					
 					for (int j = 0; j < batch_size; ++j)
 						if (target[j] == predicted[j]){
@@ -1625,11 +1676,9 @@ void run_mnist()
 					if (i+batch_size<=m){
 						if (DEBUG) print("\n\n\n\n\n");
 						value_type* targets = train_target_d+i;
-						#ifdef LENET
-							mnist.learn_example(train_data_d +i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, targets, batch_size);
-						#else
-							mnist.learn_example(train_data_d +i*N, fc1, fc1act, fc2, fc2act, targets, batch_size);
-						#endif
+						
+						LEARN_EXAMPLE
+
 						if (DEBUG) getchar();
 						else if (i%1000==0) print("."<<std::flush);
 						//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
@@ -1640,18 +1689,9 @@ void run_mnist()
 				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
 			}
 
-			#ifdef LENET
-			conv1.copyDataToHost();
-			conv2.copyDataToHost();
-			#endif
-			fc1.copyDataToHost();
-			fc2.copyDataToHost();
+			COPY_DATA_TO_HOST
 			// Save the weights in a binary file
-			if (
-				#ifdef LENET
-				conv1.save() && conv2.save() && 
-				#endif
-				fc1.save() && fc2.save())
+			if (SAVE_DATA)
 				println("Weights Saved after "<<iterations<<" iterations.");
 
 			// Testing Phase
@@ -1664,11 +1704,8 @@ void run_mnist()
 					if (i+batch_size<=n){
 						value_type* target = testing_target+i;
 						value_type predicted[batch_size];
-						#ifdef LENET
-							mnist.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted, batch_size);
-						#else
-							mnist.predict_example(testing_data_d + i*N, fc1, fc1act, fc2, fc2act, predicted, batch_size);
-						#endif
+						
+						PREDICT_EXMAPLE
 						
 						for (int j=0; j<batch_size; j++)
 							if (target[j] == predicted[j]){
@@ -1685,22 +1722,14 @@ void run_mnist()
 				println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
 				if (correct<best_correct){
 					println("Accuracy started to decrease. Stopping Learning!! "<<correct-best_correct<<" misclassified.");
-					break;
+					// break;
 				}
 				print("Correctly classified "<<(correct-best_correct)<<" new examples. ");
 				best_correct = correct;
-				#ifdef LENET
-				conv1.copyDataToHost();
-				conv2.copyDataToHost();
-				#endif
-				fc1.copyDataToHost();
-				fc2.copyDataToHost();
+				
+				COPY_DATA_TO_HOST
 				// Save the weights in a binary file
-				if (
-					#ifdef LENET
-					conv1.save() && conv2.save() && 
-					#endif
-					fc1.save() && fc2.save())
+				if (SAVE_DATA)
 					println("Weights Saved.");
 			}
 		}
