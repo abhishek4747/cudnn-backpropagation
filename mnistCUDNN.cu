@@ -1455,12 +1455,17 @@ class network_t
  * HELPER FUNCTIONS for main()
  *****************************************************************************/
 
+#define LENET
+
+#ifndef LENET
+ 	#define FFNET 100
+#endif
+
 void displayUsage()
 {
-	printf( "mnistCUDNN {<options>}\n");
-	printf( "help                   : display this help\n");
-	printf( "device=<int>           : set the device to run the sample\n");
-	// printf( "image=<name>           : classify specific image\n");
+	println( "mnistCUDNN {<options>}");
+	println( "help                   : display this help");
+	println( "device=<int>           : set the device to run the sample");
 }
 
 template <typename value_type> 
@@ -1471,216 +1476,37 @@ void readImageToDevice(const char* fname, value_type **image_data_d){
 	checkCudaErrors( cudaMemcpy(image_data_d, imgData_h, MSIZE(N), cudaMemcpyHostToDevice) );
 }
 
-
-void run_lenet()
-{
-	typedef MATRIX_DATA_TYPE value_type;
-	// Define and initialize network
-	const double base_learning_rate = 0.01;
-	const double base_gamma = 0.001;
-	const double base_power = 0.75;
-	const int batch_size = 8;
-	
-	network_t<value_type> lenet;
-	Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, 1, IMAGE_H, IMAGE_W, 0, batch_size);
-	Layer_t<value_type> pool1; 	pool1.initPoolLayer("pool1", 2, 2, conv1, 		batch_size);
-	Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", pool1.kernel_dim, 50, 5, 1, pool1.out_width, pool1.out_height, pool1.outputs, batch_size);
-	Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2, 		batch_size);
-	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", pool2.outputs, 500, 	batch_size);
-	Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs, 		batch_size);
-	Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", fc1act.outputs, 10, 	batch_size);
-	Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs, 		batch_size);
-
-	// Contains Training and Testing Examples
-	value_type *train_data, *testing_data;
-	value_type *train_target, *testing_target;
-
-	// Read training data in tempraroy variables
-	value_type *temp_training_data;
-	value_type *temp_training_target;
-
-	int total_train_data, total_test_data;
-	lenet.load_mnist_data(&temp_training_data, &testing_data, &temp_training_target, &testing_target, total_train_data, total_test_data);
-	println("\n\nData Loaded. Training examples:"<<total_train_data/N<<" Testing examples:"<<total_test_data/N<<" Data dimension:"<<N);
-
-	// Shuffle training data
-	int m = total_train_data/N;
-	int *perm = new int[m];
-	for (int i=0; i<m; i++) perm[i] = i;
-	std::random_shuffle(&perm[0],&perm[m]);
-
-	// apply the permutation
-	train_data = new value_type[m*N];
-	train_target = new value_type[m];
-	for (int i=0; i<m; i++){
-		for (int j=0; j<N; j++){
-			train_data[i*N+j] = temp_training_data[perm[i]*N+j];
-		}
-		train_target[i] = temp_training_target[perm[i]];
-	}
-	println("Training Examples shuffled.");
-
-	// Free some variables
-	delete [] temp_training_data;
-	delete [] temp_training_target;
-	delete [] perm;
-
-	// Normalizing input data by dividing by 255
-	for (int i=0; i<total_train_data; i++)
-		train_data[i] /= 255;
-	for (int i=0; i<total_test_data; i++)
-		testing_data[i] /= 255;
-
-	// Copy training and testing data to device memory
-	value_type* train_data_d = NULL;
-	checkCudaErrors( cudaMalloc(&train_data_d, MSIZE(total_train_data)) );
-	checkCudaErrors( cudaMemcpy(train_data_d, train_data, MSIZE(total_train_data), cudaMemcpyHostToDevice) );
-
-	value_type* testing_data_d = NULL;
-	checkCudaErrors( cudaMalloc(&testing_data_d, MSIZE(total_test_data)) );	
-	checkCudaErrors( cudaMemcpy(testing_data_d, testing_data, MSIZE(total_test_data), cudaMemcpyHostToDevice) );
-
-	value_type* train_target_d = NULL;
-	checkCudaErrors( cudaMalloc(&train_target_d, MSIZE(m)) );	
-	checkCudaErrors( cudaMemcpy(train_target_d, train_target, MSIZE(m), cudaMemcpyHostToDevice) );
-
-	// Try to load learned weights from file other wise start learning phase
-	if (conv1.load() && conv2.load() && fc1.load() && fc2.load())
-	{
-		conv1.copyDataToDevice();
-		conv2.copyDataToDevice();
-		fc1.copyDataToDevice();
-		fc2.copyDataToDevice();
-		println("Weights from file loaded");
-		// Testing Phase
-		{
-			print("\nTesting : ");
-			std::clock_t    start;
-			start = std::clock(); 
-			int correct = 0;
-			int n = total_test_data/N;
-			
-			for (int i=0; i<n; i+=batch_size){
-				if (i+batch_size<=n){
-					value_type* target = testing_target+i;
-					value_type predicted[batch_size];
-					lenet.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted, batch_size);
-					
-					for (int j=0; j<batch_size; j++)
-						if (target[j] == predicted[j]){
-							correct++;
-						}
-					if (!DEBUG && i%1000==0) print("."<<std::flush);
-					// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
-				}else{
-					println("Skipping "<<(n-i)<<" examples.");	
-				}
-			}
-			println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
-			println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
-		}
-	}
-	else{
-		println("\n **** Learning started ****");
-		std::clock_t    start;
-		start = std::clock(); 
-
-		// Learn all examples till convergence
-		int max_iterations = 50, iterations = 0, best_correct = 0;
-		while(iterations++ < max_iterations){ // TODO: Use a better convergence criteria
-			// Training Iteration
-			{
-				learning_rate = base_learning_rate*pow((1.0+base_gamma*(iterations-1)), -base_power);
-				print("\n\nLearning ("<<iterations<<") rate: "<<learning_rate<<" ");
-				std::clock_t    start;
-				start = std::clock();
-				for (int i=0; i<m; i+=batch_size){
-					if (i+batch_size<=m){
-						if (DEBUG) print("\n\n\n\n\n");
-						value_type* targets = train_target_d+i;
-						lenet.learn_example(train_data_d +i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, targets, batch_size);
-						if (DEBUG) getchar();
-						else if (i%1000==0) print("."<<std::flush);
-						//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
-					}else{
-						println("Skipping "<<(m-i)<<" examples.");
-					}
-				}
-				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
-			}
-
-			conv1.copyDataToHost();
-			conv2.copyDataToHost();
-			fc1.copyDataToHost();
-			fc2.copyDataToHost();
-			// Save the weights in a binary file
-			if (conv1.save() && conv2.save() && fc1.save() && fc2.save())
-				println("Weights Saved after "<<iterations<<" iterations.");
-
-			// Testing Phase
-			{
-				print("\nTesting ("<<iterations<<") : ");
-				std::clock_t    start;
-				start = std::clock(); 
-				int correct = 0;
-				int n = total_test_data/N;
-				
-				for (int i=0; i<n; i+=batch_size){
-					if (i+batch_size<=n){
-						value_type* target = testing_target+i;
-						value_type predicted[batch_size];
-						lenet.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted, batch_size);
-						
-						for (int j=0; j<batch_size; j++)
-							if (target[j] == predicted[j]){
-								correct++;
-							}
-						if (!DEBUG && i%1000==0) print("."<<std::flush);
-						// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
-					}else{
-						println("Skipping "<<(n-i)<<" examples.");	
-					}
-				}
-				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
-				println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
-				if (correct<best_correct){
-					println("Accuracy started to decrease. Stopping Learning!! "<<correct-best_correct<<" misclassified.");
-					// break;
-				}
-				print("Correctly classified "<<(correct-best_correct)<<" new examples. ");
-				best_correct = correct;
-				conv1.copyDataToHost();
-				conv2.copyDataToHost();
-				fc1.copyDataToHost();
-				fc2.copyDataToHost();
-				// Save the weights in a binary file
-				if (conv1.save() && conv2.save() && fc1.save() && fc2.save())
-					println("Weights Saved.");
-			}
-		}
-		
-		println("\n **** Learning completed ****");
-		println("Learning Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
-	}
-	checkCudaErrors( cudaFree(testing_data_d) );
-	checkCudaErrors( cudaFree(train_data_d) );
-}
-
-
 void run_mnist()
 {
 	typedef MATRIX_DATA_TYPE value_type;
+
 	// Define and initialize network
 	const double base_learning_rate = 0.01;
-	const double base_gamma = 0.0001;
 	const double base_power = 0.75;
-	const int batch_size = 16;
+	const int batch_size = 64;
+	#ifdef LENET
+		const double base_gamma = 0.001;
+	#else
+		const double base_gamma = 0.0001;
+	#endif
 
 	network_t<value_type> mnist;
-	Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", 		N, 			100, 	batch_size);
-	Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", 	fc1.outputs, 		batch_size);
-	Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", 		fc1act.outputs, 10, batch_size);
-	Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", 	fc2.outputs, 		batch_size);
+
+	#ifdef LENET
+		Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, 1, IMAGE_H, IMAGE_W, 0, batch_size);
+		Layer_t<value_type> pool1; 	pool1.initPoolLayer("pool1", 2, 2, conv1, 		batch_size);
+		Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", pool1.kernel_dim, 50, 5, 1, pool1.out_width, pool1.out_height, pool1.outputs, batch_size);
+		Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2, 		batch_size);
+		Layer_t<value_type> fc1;	fc1.initFCLayer    ("fc1", pool2.outputs, 500, 	batch_size);
+		Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs, 		batch_size);
+		Layer_t<value_type> fc2; 	fc2.initFCLayer    ("fc2", fc1act.outputs, 10, 	batch_size);
+		Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs, 		batch_size);
+	#else
+		Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", 		N, 			100, 	batch_size);
+		Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", 	fc1.outputs, 		batch_size);
+		Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", 		fc1act.outputs, 10, batch_size);
+		Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", 	fc2.outputs, 		batch_size);
+	#endif
 
 	// Contains Training and Testing Examples
 	value_type *train_data, *testing_data;
@@ -1737,8 +1563,16 @@ void run_mnist()
 	checkCudaErrors( cudaMemcpy(train_target_d, train_target, MSIZE(m), cudaMemcpyHostToDevice) );
 
 	// Try to load learned weights from file other wise start learning phase
-	if (fc1.load() && fc2.load())
+	if (
+		#ifdef LENET
+		conv1.load() && conv2.load() &&
+		#endif
+		fc1.load() && fc2.load())
 	{
+		#ifdef LENET
+			conv1.copyDataToDevice();
+			conv2.copyDataToDevice();
+		#endif
 		fc1.copyDataToDevice();
 		fc2.copyDataToDevice();
 		println("Weights from file loaded");
@@ -1753,7 +1587,11 @@ void run_mnist()
 				if (i+batch_size<=m){
 					value_type* target = testing_target+i;
 					value_type predicted[batch_size];
-					mnist.predict_example(testing_data_d + i*N, fc1, fc1act, fc2, fc2act, predicted, batch_size);
+					#ifdef LENET
+						mnist.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted, batch_size);
+					#else
+						mnist.predict_example(testing_data_d + i*N, fc1, fc1act, fc2, fc2act, predicted, batch_size);
+					#endif
 					
 					for (int j = 0; j < batch_size; ++j)
 						if (target[j] == predicted[j]){
@@ -1787,7 +1625,11 @@ void run_mnist()
 					if (i+batch_size<=m){
 						if (DEBUG) print("\n\n\n\n\n");
 						value_type* targets = train_target_d+i;
-						mnist.learn_example(train_data_d +i*N, fc1, fc1act, fc2, fc2act, targets, batch_size);
+						#ifdef LENET
+							mnist.learn_example(train_data_d +i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, targets, batch_size);
+						#else
+							mnist.learn_example(train_data_d +i*N, fc1, fc1act, fc2, fc2act, targets, batch_size);
+						#endif
 						if (DEBUG) getchar();
 						else if (i%1000==0) print("."<<std::flush);
 						//println("Example "<<i<<" learned. "<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
@@ -1798,24 +1640,47 @@ void run_mnist()
 				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
 			}
 
+			#ifdef LENET
+			conv1.copyDataToHost();
+			conv2.copyDataToHost();
+			#endif
+			fc1.copyDataToHost();
+			fc2.copyDataToHost();
+			// Save the weights in a binary file
+			if (
+				#ifdef LENET
+				conv1.save() && conv2.save() && 
+				#endif
+				fc1.save() && fc2.save())
+				println("Weights Saved after "<<iterations<<" iterations.");
+
 			// Testing Phase
 			{
 				print("\nTesting ("<<iterations<<") : ");
 				std::clock_t    start;
 				start = std::clock(); 
 				int correct = 0;
-				
-				for (int i=0; i<n; i++){
-					value_type target = testing_target[i];
-					value_type predicted = 0;
-					mnist.predict_example(testing_data_d + i*N, fc1, fc1act, fc2, fc2act, &predicted);
-					
-					if (target == predicted){
-						correct++;
+				for (int i=0; i<n; i+=batch_size){
+					if (i+batch_size<=n){
+						value_type* target = testing_target+i;
+						value_type predicted[batch_size];
+						#ifdef LENET
+							mnist.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted, batch_size);
+						#else
+							mnist.predict_example(testing_data_d + i*N, fc1, fc1act, fc2, fc2act, predicted, batch_size);
+						#endif
+						
+						for (int j=0; j<batch_size; j++)
+							if (target[j] == predicted[j]){
+								correct++;
+							}
+						if (!DEBUG && i%1000==0) print("."<<std::flush);
+						// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
+					}else{
+						println("Skipping "<<(n-i)<<" examples.");	
 					}
-					if (!DEBUG && i%1000==0) print("."<<std::flush);
-					// println("Example: "<<i<<"\tTarget: "<<target<<"\tPredicted: "<<predicted);
 				}
+				
 				println("\tTime: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC) << " second");
 				println("Accuracy: "<<((100.0 * correct)/n)<<" %\t\tCorrectly predicted "<<correct<<" examples out of "<<n);
 				if (correct<best_correct){
@@ -1824,10 +1689,18 @@ void run_mnist()
 				}
 				print("Correctly classified "<<(correct-best_correct)<<" new examples. ");
 				best_correct = correct;
+				#ifdef LENET
+				conv1.copyDataToHost();
+				conv2.copyDataToHost();
+				#endif
 				fc1.copyDataToHost();
 				fc2.copyDataToHost();
 				// Save the weights in a binary file
-				if (fc1.save() && fc2.save())
+				if (
+					#ifdef LENET
+					conv1.save() && conv2.save() && 
+					#endif
+					fc1.save() && fc2.save())
 					println("Weights Saved.");
 			}
 		}
@@ -1911,14 +1784,7 @@ int main(int argc, char *argv[])
 
 	srand(time(NULL));
 
-	bool alexnet = true;
-	if (alexnet)
-	{
-		run_lenet();
-	} else 
-	{
-		run_mnist();
-	}
+	run_mnist();
 
 	// Reset device and exit gracefully
 	cudaDeviceReset();
