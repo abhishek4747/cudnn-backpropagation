@@ -78,7 +78,8 @@
 // Define Input Dimensions
 #define IMAGE_H (28)
 #define IMAGE_W (28)
-#define N (IMAGE_H*IMAGE_W)  // dimension of training data
+#define IMAGE_D (1)
+#define N (IMAGE_D*IMAGE_H*IMAGE_W)  // dimension of training data
 
 
 // Define 2 args and 3 args max, min functions
@@ -122,6 +123,95 @@ const std::string weights_folder = "bins/";
 
 // global learning rate which decreases with epochs
 double learning_rate;
+
+#define LENET
+
+#ifndef LENET
+ 	#define FFNET 100
+#endif
+
+
+#ifdef LENET
+ 	#define BASE_GAMMA (0.001)
+ 	
+ 	#define NETWORK_ARCH			\
+ 		Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, 1, IMAGE_H, IMAGE_W, 0, batch_size);	\
+		Layer_t<value_type> pool1; 	pool1.initPoolLayer("pool1", 2, 2, conv1, 		batch_size);				\
+		Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", pool1.kernel_dim, 50, 5, 1, pool1.out_width, pool1.out_height, pool1.outputs, batch_size);		\
+		Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2, 		batch_size);				\
+		Layer_t<value_type> fc1;	fc1.initFCLayer    ("fc1", pool2.outputs, 500, 	batch_size);				\
+		Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs, 		batch_size);				\
+		Layer_t<value_type> fc2; 	fc2.initFCLayer    ("fc2", fc1act.outputs, 10, 	batch_size);				\
+		Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs, 		batch_size);				\
+	
+	#define LOAD_DATA (conv1.load() && conv2.load() && fc1.load() && fc2.load())
+
+	#define SAVE_DATA (conv1.save() && conv2.save() && fc1.save() && fc2.save())
+
+	#define COPY_DATA_TO_DEVICE		\
+		conv1.copyDataToDevice();	\
+		conv2.copyDataToDevice();	\
+		fc1.copyDataToDevice();		\
+		fc2.copyDataToDevice();		\
+
+	#define COPY_DATA_TO_HOST		\
+		conv1.copyDataToHost();		\
+		conv2.copyDataToHost();		\
+		fc1.copyDataToHost();		\
+		fc2.copyDataToHost();		\
+
+	#define LAYER_NAMES 			\
+		conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act
+
+	#define LAYER_NAMES_WITH_TYPE	\
+		Layer_t<value_type>& conv1,	\
+		Layer_t<value_type>& pool1,	\
+		Layer_t<value_type>& conv2,	\
+		Layer_t<value_type>& pool2,	\
+		Layer_t<value_type>& fc1,	\
+		Layer_t<value_type>& fc1act,\
+		Layer_t<value_type>& fc2,	\
+		Layer_t<value_type>& fc2act	\
+		
+#endif
+ 	
+
+
+#ifdef FFNET
+ 	#define BASE_GAMMA (0.0001)
+	
+	#define NETWORK_ARCH			\
+		Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", 		N, 			FFNET, 	batch_size);			\
+		Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", 	fc1.outputs, 		batch_size);			\
+		Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", 		fc1act.outputs, 10, batch_size);			\
+		Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", 	fc2.outputs, 		batch_size);			\
+
+	#define LOAD_DATA (fc1.load() && fc2.load())
+
+	#define SAVE_DATA (fc1.save() && fc2.save())
+
+	#define COPY_DATA_TO_DEVICE		\
+		fc1.copyDataToDevice();		\
+		fc2.copyDataToDevice();		\
+
+	#define COPY_DATA_TO_HOST		\
+		fc1.copyDataToHost();		\
+		fc2.copyDataToHost();		\
+
+
+	#define LAYER_NAMES 			\
+		fc1, fc1act, fc2, fc2act
+
+	#define LAYER_NAMES_WITH_TYPE	\
+		Layer_t<value_type>& fc1,	\
+		Layer_t<value_type>& fc1act,\
+		Layer_t<value_type>& fc2,	\
+		Layer_t<value_type>& fc2act	\
+
+
+#endif
+	
+	
 
 /******************************************************************************
  * HELPER FUNCTIONS for classes
@@ -920,8 +1010,6 @@ class network_t
 							value_type* diffData)
 	{
 		void* workSpace=NULL;
-
-		
 		if (layer.convBwdDataSizeInBytes!=0)
 		{
 		  checkCudaErrors( cudaMalloc(&workSpace,layer.convBwdDataSizeInBytes) );
@@ -1197,15 +1285,9 @@ class network_t
 	}
 
 	
+	#ifdef LENET
 	void predict_example(value_type* image_data_d, 
-						Layer_t<value_type>& conv1,
-						Layer_t<value_type>& pool1,
-						Layer_t<value_type>& conv2,
-						Layer_t<value_type>& pool2,
-						Layer_t<value_type>& fc1,
-						Layer_t<value_type>& fc1act,
-						Layer_t<value_type>& fc2,
-						Layer_t<value_type>& fc2act,
+						LAYER_NAMES_WITH_TYPE,
 						value_type *predictions,
 						int _batch_size=1)
 	{
@@ -1238,50 +1320,9 @@ class network_t
 			}
 		}	
 	}
-	
 
-	void predict_example(value_type* image_data_d,
-						Layer_t<value_type>& fc1,
-						Layer_t<value_type>& fc1act,
-						Layer_t<value_type>& fc2,
-						Layer_t<value_type>& fc2act,
-						value_type *predictions,
-						int _batch_size=1)
-	{
-		int n = _batch_size;
-		// if (DEBUG) println("Performing forward propagation ...");
-
-		fullyConnectedForward(fc1, 	n, image_data_d);
-		activationForward(fc1act, 	n, fc1.output_d);
-
-		fullyConnectedForward(fc2, 	n, fc1act.output_d);
-		// activationForward(fc2act, 	n, fc2.output_d);
-		softmaxForward(fc2act, 	n, fc2.output_d);
-
-		const int max_digits = fc2act.outputs;
-		
-		value_type result[n*max_digits];
-		checkCudaErrors( cudaMemcpy(result, fc2act.output_d, MSIZE(n*max_digits), cudaMemcpyDeviceToHost) );
-		for (int batch=0; batch<n; batch++)
-		{		
-			predictions[batch] = 0;
-			for (int i = 1; i < max_digits; i++)
-			{
-				if ((result[(int)predictions[batch]]) < (result[i])) predictions[batch] = i;
-			}
-		}	
-	}
-
-	
 	void learn_example(value_type* image_data_d, 
-						Layer_t<value_type>& conv1,
-						Layer_t<value_type>& pool1,
-						Layer_t<value_type>& conv2,
-						Layer_t<value_type>& pool2,
-						Layer_t<value_type>& fc1,
-						Layer_t<value_type>& fc1act,
-						Layer_t<value_type>& fc2,
-						Layer_t<value_type>& fc2act,
+						LAYER_NAMES_WITH_TYPE,
 						value_type* targets,
 						int _batch_size=1)
 	{
@@ -1328,12 +1369,41 @@ class network_t
 
 		checkCudaErrors( cudaFree(diffData) );
 	}
+	#endif
+	
+
+	#ifdef FFNET
+	void predict_example(value_type* image_data_d,
+						LAYER_NAMES_WITH_TYPE,
+						value_type *predictions,
+						int _batch_size=1)
+	{
+		int n = _batch_size;
+		// if (DEBUG) println("Performing forward propagation ...");
+
+		fullyConnectedForward(fc1, 	n, image_data_d);
+		activationForward(fc1act, 	n, fc1.output_d);
+
+		fullyConnectedForward(fc2, 	n, fc1act.output_d);
+		// activationForward(fc2act, 	n, fc2.output_d);
+		softmaxForward(fc2act, 	n, fc2.output_d);
+
+		const int max_digits = fc2act.outputs;
+		
+		value_type result[n*max_digits];
+		checkCudaErrors( cudaMemcpy(result, fc2act.output_d, MSIZE(n*max_digits), cudaMemcpyDeviceToHost) );
+		for (int batch=0; batch<n; batch++)
+		{		
+			predictions[batch] = 0;
+			for (int i = 1; i < max_digits; i++)
+			{
+				if ((result[(int)predictions[batch]]) < (result[i])) predictions[batch] = i;
+			}
+		}	
+	}
 	
 	void learn_example(value_type* image_data_d, 
-						Layer_t<value_type>& fc1,
-						Layer_t<value_type>& fc1act,
-						Layer_t<value_type>& fc2,
-						Layer_t<value_type>& fc2act,
+						LAYER_NAMES_WITH_TYPE,
 						value_type* targets,
 						int _batch_size=1)
 	{
@@ -1368,6 +1438,7 @@ class network_t
 
 		checkCudaErrors( cudaFree(diffData) );
 	}
+	#endif
 	
 
 	static void load_mnist_data(value_type **training_data, value_type **testing_data,
@@ -1467,81 +1538,6 @@ class network_t
  * HELPER FUNCTIONS for main()
  *****************************************************************************/
 
-#define LENET
-
-#ifndef LENET
- 	#define FFNET 100
-#endif
-
-
-#ifdef LENET
- 	#define BASE_GAMMA (0.001)
- 	
- 	#define NETWORK_ARCH			\
- 		Layer_t<value_type> conv1; 	conv1.initConvLayer("conv1", 1, 20, 5, 1, IMAGE_H, IMAGE_W, 0, batch_size);	\
-		Layer_t<value_type> pool1; 	pool1.initPoolLayer("pool1", 2, 2, conv1, 		batch_size);				\
-		Layer_t<value_type> conv2; 	conv2.initConvLayer("conv2", pool1.kernel_dim, 50, 5, 1, pool1.out_width, pool1.out_height, pool1.outputs, batch_size);		\
-		Layer_t<value_type> pool2; 	pool2.initPoolLayer("pool2", 2, 2, conv2, 		batch_size);				\
-		Layer_t<value_type> fc1;	fc1.initFCLayer    ("fc1", pool2.outputs, 500, 	batch_size);				\
-		Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", fc1.outputs, 		batch_size);				\
-		Layer_t<value_type> fc2; 	fc2.initFCLayer    ("fc2", fc1act.outputs, 10, 	batch_size);				\
-		Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", fc2.outputs, 		batch_size);				\
-	
-	#define LOAD_DATA (conv1.load() && conv2.load() && fc1.load() && fc2.load())
-
-	#define SAVE_DATA (conv1.save() && conv2.save() && fc1.save() && fc2.save())
-
-	#define COPY_DATA_TO_DEVICE		\
-		conv1.copyDataToDevice();	\
-		conv2.copyDataToDevice();	\
-		fc1.copyDataToDevice();		\
-		fc2.copyDataToDevice();		\
-
-	#define COPY_DATA_TO_HOST		\
-		conv1.copyDataToHost();		\
-		conv2.copyDataToHost();		\
-		fc1.copyDataToHost();		\
-		fc2.copyDataToHost();		\
-
-	#define PREDICT_EXMAPLE 		\
-		mnist.predict_example(testing_data_d + i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, predicted, batch_size);
-
-	#define LEARN_EXAMPLE 			\
-		mnist.learn_example(train_data_d +i*N, conv1, pool1, conv2, pool2, fc1, fc1act, fc2, fc2act, targets, batch_size);
-		
-#endif
- 	
-
-
-#ifdef FFNET
- 	#define BASE_GAMMA (0.0001)
-	
-	#define NETWORK_ARCH			\
-		Layer_t<value_type> fc1;	fc1.initFCLayer(	"fc1", 		N, 			FFNET, 	batch_size);			\
-		Layer_t<value_type> fc1act; fc1act.initActLayer("fc1act", 	fc1.outputs, 		batch_size);			\
-		Layer_t<value_type> fc2; 	fc2.initFCLayer(	"fc2", 		fc1act.outputs, 10, batch_size);			\
-		Layer_t<value_type> fc2act; fc2act.initActLayer("fc2act", 	fc2.outputs, 		batch_size);			\
-
-	#define LOAD_DATA (fc1.load() && fc2.load())
-
-	#define SAVE_DATA (fc1.save() && fc2.save())
-
-	#define COPY_DATA_TO_DEVICE		\
-		fc1.copyDataToDevice();		\
-		fc2.copyDataToDevice();		\
-
-	#define COPY_DATA_TO_HOST		\
-		fc1.copyDataToHost();		\
-		fc2.copyDataToHost();		\
-
-	#define PREDICT_EXMAPLE 		\
-		mnist.predict_example(testing_data_d + i*N, fc1, fc1act, fc2, fc2act, predicted, batch_size);
-
-	#define LEARN_EXAMPLE 			\
-		mnist.learn_example(train_data_d +i*N, fc1, fc1act, fc2, fc2act, targets, batch_size);
-
-#endif
-
 void displayUsage()
 {
 	println( "mnistCUDNN {<options>}");
@@ -1564,7 +1560,7 @@ void run_mnist()
 	// Define and initialize network
 	const double base_learning_rate = 0.01;
 	const double base_power = 0.75;
-	const int batch_size = 32;
+	const int batch_size = 16;
 	const double base_gamma = BASE_GAMMA;
 
 	network_t<value_type> mnist;
@@ -1632,17 +1628,17 @@ void run_mnist()
 		println("Weights from file loaded");
 		// Testing Phase
 		{
-			print("\nTesting : ");
+			print("\nTesting : \tBatch size: "<<batch_size<<"\t");
 			std::clock_t    start;
 			start = std::clock(); 
 			int correct = 0;
 			
 			for (int i=0; i<n; i+=batch_size){
-				if (i+batch_size<=m){
+				if (i+batch_size<=n){
 					value_type* target = testing_target+i;
 					value_type predicted[batch_size];
 					
-					PREDICT_EXMAPLE
+					mnist.predict_example(testing_data_d + i*N, LAYER_NAMES, predicted, batch_size);
 					
 					for (int j = 0; j < batch_size; ++j)
 						if (target[j] == predicted[j]){
@@ -1669,7 +1665,8 @@ void run_mnist()
 			// Training Iteration
 			{
 				learning_rate = base_learning_rate*pow((1.0+base_gamma*(iterations-1)), -base_power);
-				print("learning rate: "<<learning_rate<<" ");
+				print("\nLearning ("<<iterations<<") : ");
+				print("learning rate: "<<learning_rate<<"\tBatch Size: "<<batch_size<<"\t");
 				std::clock_t    start;
 				start = std::clock();
 				for (int i=0; i<m; i+=batch_size){
@@ -1677,7 +1674,7 @@ void run_mnist()
 						if (DEBUG) print("\n\n\n\n\n");
 						value_type* targets = train_target_d+i;
 						
-						LEARN_EXAMPLE
+						mnist.learn_example(train_data_d +i*N, LAYER_NAMES, targets, batch_size);
 
 						if (DEBUG) getchar();
 						else if (i%1000==0) print("."<<std::flush);
@@ -1705,7 +1702,7 @@ void run_mnist()
 						value_type* target = testing_target+i;
 						value_type predicted[batch_size];
 						
-						PREDICT_EXMAPLE
+						mnist.predict_example(testing_data_d + i*N, LAYER_NAMES, predicted, batch_size);
 						
 						for (int j=0; j<batch_size; j++)
 							if (target[j] == predicted[j]){
@@ -1739,6 +1736,7 @@ void run_mnist()
 	}
 	checkCudaErrors( cudaFree(testing_data_d) );
 	checkCudaErrors( cudaFree(train_data_d) );
+	checkCudaErrors( cudaFree(train_target_d) );
 }
 
 void readJPGImage(std::string jpgfile, MATRIX_DATA_TYPE* imageData_h){
